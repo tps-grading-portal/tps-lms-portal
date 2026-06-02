@@ -71,9 +71,14 @@ export default async function ClassDetailPage({ params }: PageProps) {
             Created {new Date(cls.createdAt).toLocaleDateString()}
           </p>
         </div>
-        <a href={`/api/export/${cls.id}`} download className="btn-primary">
-          ↓ Export Excel
-        </a>
+        <div className="flex gap-2">
+          <Link href={`/admin/classes/${classId}/history`} className="btn-secondary">
+            Grade History
+          </Link>
+          <a href={`/api/export/${cls.id}`} download className="btn-primary">
+            ↓ Export Excel
+          </a>
+        </div>
       </div>
 
       {/* Stats */}
