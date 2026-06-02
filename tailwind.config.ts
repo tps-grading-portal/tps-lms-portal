@@ -35,6 +35,17 @@ const config: Config = {
         sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
       },
     },
+    keyframes: {
+      'horn-pop': {
+        '0%':   { transform: 'scale(0) rotate(-20deg)', opacity: '0' },
+        '60%':  { transform: 'scale(1.35) rotate(15deg)', opacity: '1' },
+        '80%':  { transform: 'scale(0.9) rotate(-8deg)' },
+        '100%': { transform: 'scale(1.1) rotate(10deg)' },
+      },
+    },
+    animation: {
+      'horn-pop': 'horn-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+    },
   },
   plugins: [],
 }

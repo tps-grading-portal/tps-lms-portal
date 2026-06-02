@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { redirect } from 'next/navigation'
 import { GradeForm } from './grade-form'
 import { clearPinToken } from '@/lib/pin-auth'
+import { SuccessScreen } from './success-screen'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Enter Grades' }
@@ -72,21 +73,9 @@ export default async function GraderPage({ searchParams }: PageProps) {
   // Success confirmation screen
   if (params.submitted === '1') {
     return (
-      <main className="min-h-screen bg-gray-50">
+      <main className="min-h-screen bg-gray-50 overflow-hidden">
         <Header className={cls?.name} />
-        <div className="max-w-lg mx-auto px-4 py-12 text-center space-y-5">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100">
-            <span className="text-green-600 text-4xl">✓</span>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900">Grades Submitted</h1>
-          <p className="text-gray-600">
-            Your grades have been recorded for Class{' '}
-            <strong>{cls?.name}</strong>.
-          </p>
-          <a href="/grade" className="btn-primary inline-flex mt-2">
-            Grade Another Student
-          </a>
-        </div>
+        <SuccessScreen className={cls?.name} />
       </main>
     )
   }
