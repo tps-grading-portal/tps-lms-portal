@@ -1,0 +1,306 @@
+// TPS Grading Portal — Prisma Schema
+// PostgreSQL + Prisma 6
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ADMIN
+// ============================================================
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  lastLoginAt  DateTime?
+
+  @@map("admin_users")
+}
+
+// ============================================================
+// CLASSES & ACCESS CONTROL
+// ============================================================
+
+model Class {
+  id         String    @id @default(cuid())
+  name       String    @unique // e.g. "25B", "26A"
+  isActive   Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  archivedAt DateTime?
+
+  access            ClassAccess[]
+  students          Student[]
+  scenarios         Scenario[]
+  sessions          GradingSession[]
+  studentSurveys    StudentSurveyResponse[]
+  instructorSurveys InstructorSurveyResponse[]
+  surveyTemplates   SurveyQuestionTemplate[]
+
+  @@map("classes")
+}
+
+// One row per role per class. Only GRADER and PANEL_CHAIR need PINs.
+// Surveys are open-access (no PIN). Admin uses AdminUser table.
+model ClassAccess {
+  id           String     @id @default(cuid())
+  classId      String
+  role         AccessRole
+  passwordHash String
+  updatedAt    DateTime   @updatedAt
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, role])
+  @@map("class_access")
+}
+
+enum AccessRole {
+  GRADER
+  PANEL_CHAIR
+}
+
+// ============================================================
+// STAFF MEMBERS (global — persist across classes)
+// ============================================================
+
+model StaffMember {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  assessments GraderAssessment[]
+
+  @@map("staff_members")
+}
+
+// ============================================================
+// SCENARIOS (per class, admin-managed numbered list)
+// ============================================================
+
+model Scenario {
+  id       String  @id @default(cuid())
+  classId  String
+  number   Int
+  label    String  // e.g. "Scenario 4"
+  isActive Boolean @default(true)
+
+  class    Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  sessions GradingSession[]
+
+  @@unique([classId, number])
+  @@map("scenarios")
+}
+
+// ============================================================
+// RUBRIC CRITERIA (seeded from rubric.csv, admin-editable)
+// ============================================================
+
+model Criterion {
+  id             String @id @default(cuid())
+  code           String @unique // "1.1", "1.2", ... "3.1"
+  pillar         Pillar
+  name           String
+  // Stored as float — weights must sum to 1.0
+  weight         Float  // 0.15, 0.25, 0.10, 0.20, 0.20, 0.025, 0.075
+  outcomesRefs   String // "1" or "1,2" — TPS School Outcome numbers
+  description    String @db.Text // Short task description shown on grading form
+  waaDescriptor  String @db.Text // "Well Above Average" anchor text
+  avgDescriptor  String @db.Text // "Average" anchor text
+  failDescriptor String @db.Text // "Fail" anchor text
+  sortOrder      Int    @unique
+
+  grades CriterionGrade[]
+
+  @@map("criteria")
+}
+
+enum Pillar {
+  TESTER
+  LEADER
+  THINKER
+}
+
+// ============================================================
+// STUDENTS
+// ============================================================
+
+model Student {
+  id        String   @id @default(cuid())
+  classId   String
+  name      String
+  track     Track
+  createdAt DateTime @default(now())
+
+  class    Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  sessions GradingSession[]
+
+  @@unique([classId, name])
+  @@map("students")
+}
+
+enum Track {
+  PILOT
+  RPA
+  FTE
+  OPERATOR  // STC / Space Test Course
+  CSO_WSO   // Combat Systems Officer / Weapon Systems Officer
+  ABM       // Air Battle Manager
+}
+
+// ============================================================
+// GRADING SESSIONS
+// One session = one student's full panel evaluation.
+// Requires 4-5 GraderAssessments before finalization.
+// ============================================================
+
+model GradingSession {
+  id          String        @id @default(cuid())
+  classId     String
+  studentId   String
+  scenarioId  String
+  status      SessionStatus @default(OPEN)
+  // Null until session reaches FINALIZED status
+  finalScore  Float?        // 69.0 for any-fail, else weighted average of grader weighted sums
+  hasFail     Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  finalizedAt DateTime?
+
+  class       Class              @relation(fields: [classId], references: [id])
+  student     Student            @relation(fields: [studentId], references: [id])
+  scenario    Scenario           @relation(fields: [scenarioId], references: [id])
+  assessments GraderAssessment[]
+
+  @@map("grading_sessions")
+}
+
+enum SessionStatus {
+  OPEN               // Fewer than 4 graders have submitted
+  PENDING_RESOLUTION // 4+ graders submitted; discontinuities exist awaiting resolution
+  READY_TO_FINALIZE  // 4+ graders submitted; no outstanding discontinuities
+  FINALIZED          // Admin has locked the session; finalScore is set
+}
+
+// ============================================================
+// GRADER ASSESSMENTS
+// One per grader per session. Exactly 4–5 per session.
+// ============================================================
+
+model GraderAssessment {
+  id            String    @id @default(cuid())
+  sessionId     String
+  staffMemberId String
+  // Computed when all 7 criteria are submitted.
+  // = sum(NUMERIC_MAP[gradeValue] * criterion.weight) for each criterion
+  // Set to 69.0 if any criterion grade = 8 (Fail)
+  weightedSum   Float?
+  hasFail       Boolean   @default(false)
+  submittedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  session     GradingSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  staffMember StaffMember      @relation(fields: [staffMemberId], references: [id])
+  grades      CriterionGrade[]
+
+  // A grader may only assess a given session once
+  @@unique([sessionId, staffMemberId])
+  @@map("grader_assessments")
+}
+
+// ============================================================
+// CRITERION GRADES
+// One per criterion (7 total) per GraderAssessment.
+// Mutable: both grader self-update and Panel Chair override are supported.
+// ============================================================
+
+model CriterionGrade {
+  id             String    @id @default(cuid())
+  assessmentId   String
+  criterionId    String
+  gradeValue     Int       // 1–8 (current value)
+  originalValue  Int?      // Preserved on first submit; null before any edit
+  // True when any other grader's grade for the same criterion in the same session
+  // differs from this grade by more than 2 points on the 1-8 scale
+  isDiscontinuity Boolean  @default(false)
+  editedBy       EditSource?
+  editedAt       DateTime?
+  submittedAt    DateTime  @default(now())
+
+  assessment GraderAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  criterion  Criterion        @relation(fields: [criterionId], references: [id])
+
+  @@unique([assessmentId, criterionId])
+  @@map("criterion_grades")
+}
+
+// Who last modified this grade after initial submission
+enum EditSource {
+  GRADER       // Grader updated their own score via "Update" button
+  PANEL_CHAIR  // Panel Chair adjusted grader's score directly from dashboard
+}
+
+// ============================================================
+// SURVEYS
+// ============================================================
+
+// Question templates — classId null = global default for all classes.
+// A class-specific row (classId set) overrides the global template for that class.
+model SurveyQuestionTemplate {
+  id           String       @id @default(cuid())
+  surveyType   SurveyType
+  classId      String?      // null = applies to all classes
+  sortOrder    Int
+  questionKey  String       // machine-readable key e.g. "problem_statement_clarity"
+  questionText String       @db.Text
+  questionType QuestionType
+  options      Json?        // string[] for MULTIPLE_CHOICE / LIKERT
+  isRequired   Boolean      @default(true)
+
+  class Class? @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@map("survey_question_templates")
+}
+
+enum SurveyType {
+  STUDENT
+  INSTRUCTOR
+}
+
+enum QuestionType {
+  TEXT            // Free-text / textarea
+  MULTIPLE_CHOICE // Single-select from options[]
+  MULTI_SELECT    // Multi-select from options[]
+  LIKERT          // Numeric scale (options[] = labels)
+  DATE
+  NUMBER
+}
+
+model StudentSurveyResponse {
+  id          String   @id @default(cuid())
+  classId     String
+  // { questionKey: answer } — stores question text alongside answer for historical integrity
+  responses   Json
+  submittedAt DateTime @default(now())
+
+  class Class @relation(fields: [classId], references: [id])
+
+  @@map("student_survey_responses")
+}
+
+model InstructorSurveyResponse {
+  id          String   @id @default(cuid())
+  classId     String
+  responses   Json
+  submittedAt DateTime @default(now())
+
+  class Class @relation(fields: [classId], references: [id])
+
+  @@map("instructor_survey_responses")
+}
