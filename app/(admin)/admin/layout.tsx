@@ -1,5 +1,4 @@
 import { auth } from '@/lib/auth'
-import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { signOut } from '@/lib/auth'
 import type { Metadata } from 'next'
@@ -15,8 +14,9 @@ const NAV_ITEMS = [
 ]
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth()
-  if (!session) redirect('/admin/login')
+  // Route protection is handled entirely by middleware.ts — no redirect here.
+  // Duplicating it in the layout caused an infinite loop on /admin/login.
+  await auth()
 
   return (
     <div className="min-h-screen bg-gray-50">
