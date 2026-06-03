@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { revokeAndDeleteInviteAction, deleteSandboxFormAction, duplicateSandboxFormAction, resetSandboxPinAction } from './actions'
+import { revokeAndDeleteInviteAction, deleteSandboxFormAction, duplicateSandboxFormAction, resetSandboxPinAction, resetCreatorInvitePinAction } from './actions'
 import { cn } from '@/lib/utils'
 
 type Invite = {
@@ -47,14 +47,24 @@ export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
   const [pinPanelId,   setPinPanelId]   = useState<string | null>(null)
   const [pinInput,     setPinInput]     = useState('')
   const [pinBusy,      setPinBusy]      = useState(false)
-  const [pinResult,    setPinResult]    = useState<{ formId: string; type: string; newPin: string } | null>(null)
+  const [pinResult,    setPinResult]    = useState<{ id: string; type: string; newPin: string } | null>(null)
 
   const handleResetPin = async (formId: string, type: 'submit' | 'results') => {
     setPinBusy(true)
     const res = await resetSandboxPinAction(formId, type, pinInput || undefined)
     setPinBusy(false)
     if ('success' in res && res.success) {
-      setPinResult({ formId, type, newPin: res.newPin })
+      setPinResult({ id: formId, type, newPin: res.newPin })
+      setPinInput('')
+    }
+  }
+
+  const handleResetCreatorPin = async (inviteId: string) => {
+    setPinBusy(true)
+    const res = await resetCreatorInvitePinAction(inviteId, pinInput || undefined)
+    setPinBusy(false)
+    if ('success' in res && res.success) {
+      setPinResult({ id: inviteId, type: 'creator', newPin: res.newPin })
       setPinInput('')
     }
   }
@@ -118,14 +128,12 @@ export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
                       Manage Form
                     </Link>
                   )}
-                  {invite.form && (
-                    <button
-                      onClick={() => { setPinPanelId(pinPanelId === invite.form!.id ? null : invite.form!.id); setPinResult(null); setPinInput('') }}
-                      className="btn-secondary text-xs"
-                    >
-                      🔑 Reset PIN
-                    </button>
-                  )}
+                  <button
+                    onClick={() => { setPinPanelId(pinPanelId === invite.id ? null : invite.id); setPinResult(null); setPinInput('') }}
+                    className="btn-secondary text-xs"
+                  >
+                    🔑 Reset PIN
+                  </button>
                   <button
                     onClick={() => setConfirmId(invite.id)}
                     className="text-xs text-red-400 hover:text-red-600 min-h-[32px] px-2"
@@ -160,14 +168,16 @@ export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
               )}
 
               {/* PIN reset panel */}
-              {invite.form && pinPanelId === invite.form.id && (
-                <PinResetPanel
-                  formId={invite.form.id}
+              {pinPanelId === invite.id && (
+                <InvitePinResetPanel
+                  inviteId={invite.id}
+                  formId={invite.form?.id ?? null}
                   pinBusy={pinBusy}
                   pinInput={pinInput}
                   setPinInput={setPinInput}
                   pinResult={pinResult}
-                  onReset={handleResetPin}
+                  onResetCreator={handleResetCreatorPin}
+                  onResetForm={handleResetPin}
                   onClose={() => { setPinPanelId(null); setPinResult(null) }}
                 />
               )}
@@ -311,7 +321,7 @@ function PinResetPanel({
   pinBusy:     boolean
   pinInput:    string
   setPinInput: (v: string) => void
-  pinResult:   { formId: string; type: string; newPin: string } | null
+  pinResult:   { id: string; type: string; newPin: string } | null
   onReset:     (formId: string, type: 'submit' | 'results') => void
   onClose:     () => void
 }) {
@@ -321,42 +331,84 @@ function PinResetPanel({
         <p className="text-sm font-semibold text-gray-700">🔑 Reset Access PIN</p>
         <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">✕ Close</button>
       </div>
-
-      <div className="flex gap-2 items-center">
-        <input
-          value={pinInput}
-          onChange={(e) => setPinInput(e.target.value)}
-          placeholder="Leave blank to auto-generate"
-          className="field-input text-sm font-mono tracking-widest flex-1"
-          maxLength={20}
-        />
-      </div>
-
+      <input
+        value={pinInput}
+        onChange={(e) => setPinInput(e.target.value)}
+        placeholder="Leave blank to auto-generate"
+        className="field-input text-sm font-mono tracking-widest w-full"
+        maxLength={20}
+      />
       <div className="flex gap-2">
-        <button
-          onClick={() => onReset(formId, 'submit')}
-          disabled={pinBusy}
-          className="btn-secondary text-xs flex-1"
-        >
+        <button onClick={() => onReset(formId, 'submit')} disabled={pinBusy} className="btn-secondary text-xs flex-1">
           {pinBusy ? '…' : 'Reset Submit PIN'}
         </button>
-        <button
-          onClick={() => onReset(formId, 'results')}
-          disabled={pinBusy}
-          className="btn-secondary text-xs flex-1"
-        >
+        <button onClick={() => onReset(formId, 'results')} disabled={pinBusy} className="btn-secondary text-xs flex-1">
           {pinBusy ? '…' : 'Reset Results PIN'}
         </button>
       </div>
-
-      {pinResult && pinResult.formId === formId && (
+      {pinResult && pinResult.id === formId && (
         <div className="bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
           <p className="text-xs font-bold text-amber-800 uppercase tracking-wide mb-1">
             ⚠ New {pinResult.type} PIN — save this now
           </p>
-          <p className="font-mono text-2xl font-bold tracking-widest text-tps-navy">
-            {pinResult.newPin}
+          <p className="font-mono text-2xl font-bold tracking-widest text-tps-navy">{pinResult.newPin}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InvitePinResetPanel({
+  inviteId, formId, pinBusy, pinInput, setPinInput, pinResult, onResetCreator, onResetForm, onClose,
+}: {
+  inviteId:        string
+  formId:          string | null
+  pinBusy:         boolean
+  pinInput:        string
+  setPinInput:     (v: string) => void
+  pinResult:       { id: string; type: string; newPin: string } | null
+  onResetCreator:  (inviteId: string) => void
+  onResetForm:     (formId: string, type: 'submit' | 'results') => void
+  onClose:         () => void
+}) {
+  return (
+    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-gray-700">🔑 Reset Access PIN</p>
+        <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">✕ Close</button>
+      </div>
+      <input
+        value={pinInput}
+        onChange={(e) => setPinInput(e.target.value)}
+        placeholder="Leave blank to auto-generate"
+        className="field-input text-sm font-mono tracking-widest w-full"
+        maxLength={20}
+      />
+      <div className="space-y-2">
+        <p className="text-xs text-gray-500 font-medium">Creator builder access</p>
+        <button onClick={() => onResetCreator(inviteId)} disabled={pinBusy} className="btn-secondary text-xs w-full">
+          {pinBusy ? '…' : 'Reset Creator Builder PIN'}
+        </button>
+      </div>
+      {formId && (
+        <div className="space-y-2">
+          <p className="text-xs text-gray-500 font-medium">Survey access</p>
+          <div className="flex gap-2">
+            <button onClick={() => onResetForm(formId, 'submit')} disabled={pinBusy} className="btn-secondary text-xs flex-1">
+              {pinBusy ? '…' : 'Reset Submit PIN'}
+            </button>
+            <button onClick={() => onResetForm(formId, 'results')} disabled={pinBusy} className="btn-secondary text-xs flex-1">
+              {pinBusy ? '…' : 'Reset Results PIN'}
+            </button>
+          </div>
+        </div>
+      )}
+      {pinResult && (pinResult.id === inviteId || pinResult.id === formId) && (
+        <div className="bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+          <p className="text-xs font-bold text-amber-800 uppercase tracking-wide mb-1">
+            ⚠ New {pinResult.type} PIN — save this now
           </p>
+          <p className="font-mono text-2xl font-bold tracking-widest text-tps-navy">{pinResult.newPin}</p>
         </div>
       )}
     </div>

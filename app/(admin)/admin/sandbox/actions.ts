@@ -112,6 +112,25 @@ export async function resetSandboxPinAction(
   return { success: true, newPin }
 }
 
+export async function resetCreatorInvitePinAction(
+  inviteId:  string,
+  customPin?: string,
+): Promise<PinResetResult> {
+  const session = await auth()
+  if (!session) return { success: false, error: 'Unauthorized' }
+
+  const newPin  = customPin?.trim() || Array.from({ length: 6 }, () => Math.floor(Math.random() * 10)).join('')
+  const newHash = await hashPin(newPin)
+
+  await db.sandboxCreatorInvite.update({
+    where: { id: inviteId },
+    data:  { pinHash: newHash },
+  })
+
+  revalidatePath('/admin/sandbox')
+  return { success: true, newPin }
+}
+
 // ── Admin creates a form directly (no invite needed) ─────────────────────────
 
 export async function adminCreateFormAction(
