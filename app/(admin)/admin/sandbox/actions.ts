@@ -10,7 +10,7 @@ import { Resend } from 'resend'
 // ── Send creator invite ───────────────────────────────────────────────────────
 
 export type InviteResult =
-  | { success: true; linkToken: string; pin: string; emailSent: boolean; recipientEmail: string }
+  | { success: true; linkToken: string; pin: string; emailSent: boolean; recipientEmail: string; emailError?: string }
   | { success: false; error: string }
 
 export async function createCreatorInviteAction(formData: FormData): Promise<InviteResult> {
@@ -45,10 +45,11 @@ export async function createCreatorInviteAction(formData: FormData): Promise<Inv
   const baseUrl    = process.env.NEXTAUTH_URL ?? 'http://localhost:3000'
   const creatorUrl = `${baseUrl}/creator/${linkToken}`
 
-  let emailSent = false
+  let emailSent  = false
+  let emailError = ''
   if (process.env.RESEND_API_KEY) {
     const resend = new Resend(process.env.RESEND_API_KEY)
-    const { error } = await resend.emails.send({
+    const { data, error } = await resend.emails.send({
       from:    'TPS Test Foundations <onboarding@resend.dev>',
       to:      recipientEmail,
       subject: `You've been invited to build a form — ${formSubject}`,
@@ -91,7 +92,16 @@ export async function createCreatorInviteAction(formData: FormData): Promise<Inv
         </div>
       `,
     })
-    if (!error) emailSent = true
+    if (error) {
+      emailError = (error as { message?: string }).message ?? JSON.stringify(error)
+      console.error('[Resend] email send failed:', emailError)
+    } else {
+      console.log('[Resend] email sent, id:', data?.id)
+      emailSent = true
+    }
+  } else {
+    emailError = 'RESEND_API_KEY not configured'
+    console.warn('[Resend] RESEND_API_KEY not set — skipping email')
   }
 
   await db.sandboxCreatorInvite.update({
@@ -100,7 +110,7 @@ export async function createCreatorInviteAction(formData: FormData): Promise<Inv
   })
 
   revalidatePath('/admin/sandbox')
-  return { success: true, linkToken, pin, emailSent, recipientEmail }
+  return { success: true, linkToken, pin, emailSent, recipientEmail, emailError: emailError || undefined }
 }
 
 // ── Delete / revoke a creator invite and all its content ────────────────────

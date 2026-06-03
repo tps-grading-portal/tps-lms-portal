@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createCreatorInviteAction } from '../actions'
 
 export default function SendInvitePage() {
-  const [result,    setResult]    = useState<{ linkToken?: string; pin?: string; emailSent?: boolean; recipientEmail?: string; error?: string } | null>(null)
+  const [result,    setResult]    = useState<{ linkToken?: string; pin?: string; emailSent?: boolean; recipientEmail?: string; emailError?: string; error?: string } | null>(null)
   const [sending,   setSending]   = useState(false)
   const [copied,    setCopied]    = useState<'link' | 'pin' | null>(null)
 
@@ -17,7 +17,7 @@ export default function SendInvitePage() {
     const fd = new FormData(e.currentTarget)
     const res = await createCreatorInviteAction(fd)
     setResult('success' in res && res.success
-      ? { linkToken: res.linkToken, pin: res.pin, emailSent: res.emailSent, recipientEmail: res.recipientEmail }
+      ? { linkToken: res.linkToken, pin: res.pin, emailSent: res.emailSent, recipientEmail: res.recipientEmail, emailError: res.emailError }
       : { error: 'error' in res ? res.error : 'Unknown error' })
     setSending(false)
   }
@@ -66,9 +66,12 @@ export default function SendInvitePage() {
               ✓ Invite email sent to <strong>{result.recipientEmail}</strong>. The URL and PIN above are shown for your records.
             </p>
           ) : (
-            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-              ⚠ Email could not be sent automatically. Please share the URL and PIN with the recipient manually.
-            </p>
+            <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 space-y-1">
+              <p>⚠ Email could not be sent automatically. Please share the URL and PIN with the recipient manually.</p>
+              {result.emailError && (
+                <p className="text-xs font-mono text-red-600">Reason: {result.emailError}</p>
+              )}
+            </div>
           )}
         </div>
 
