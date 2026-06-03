@@ -106,6 +106,14 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
   // Format an answer value for display
   const formatAnswer = (val: unknown, q: Question): string => {
     if (val === undefined || val === null || val === '') return '—'
+    // REPEATING_SECTION: show compact summary in table cells
+    if (q.questionType === 'REPEATING_SECTION') {
+      try {
+        const entries = parseRepeatEntries(val)
+        if (entries.length === 0) return '—'
+        return `${entries.length} person${entries.length !== 1 ? 's' : ''} graded`
+      } catch { return '(repeating section)' }
+    }
     if (Array.isArray(val)) return val.join(', ')
     if (q.questionType === 'GRADE_1_8') {
       const n = parseInt(String(val))
@@ -115,11 +123,8 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
     return String(val)
   }
 
-  // Short label for column headers (first 4 words + ellipsis if longer)
-  const shortLabel = (label: string): string => {
-    const words = label.split(' ')
-    return words.length <= 4 ? label : words.slice(0, 4).join(' ') + '…'
-  }
+  // Column headers: Q1, Q2, Q3 — full text available on hover
+  const qLabel = (index: number): string => `Q${index + 1}`
 
   const llmPrompt = useMemo(
     () => generateLLMPrompt(
@@ -417,9 +422,9 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
                 <th className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Submitted</th>
                 {form.mode === 'GRADER' && <th className="px-3 py-2 text-left font-semibold text-gray-600">Subject</th>}
                 <th className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Grader / Respondent</th>
-                {questions.map((q) => (
-                  <th key={q.id} className="px-3 py-2 text-left font-semibold text-gray-600 min-w-[80px] max-w-[140px]">
-                    <span title={q.label} className="block truncate cursor-help">{shortLabel(q.label)}</span>
+                {questions.map((q, qi) => (
+                  <th key={q.id} className="px-3 py-2 text-left font-semibold text-gray-600 min-w-[60px]">
+                    <span title={q.label} className="cursor-help font-mono">{qLabel(qi)}</span>
                   </th>
                 ))}
                 {form.scoringEnabled && <th className="px-3 py-2 text-left font-semibold text-gray-600">Score</th>}
@@ -521,51 +526,144 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
             </div>
 
             {/* Questions */}
-            {questions.map((q) => {
+            {questions.map((q, qi) => {
               const rawVal  = editMode ? editAnswers[q.id] : gradecard.answers[q.id]
-              const display = formatAnswer(rawVal, q)
               const opts    = Array.isArray(q.options) ? (q.options as string[]) : []
+              const config  = q.questionType === 'REPEATING_SECTION'
+                ? (q.options as { subQuestions?: { id: string; label: string; type: string }[] } | null)
+                : null
 
               return (
-                <div key={q.id} className="border-b border-gray-100 pb-3 last:border-0">
-                  <p className="text-xs font-semibold text-gray-700 mb-1">{q.label}</p>
-                  {!editMode ? (
-                    <p className={cn('text-sm', display === '—' ? 'text-gray-400 italic' : 'text-gray-900')}>{display}</p>
-                  ) : (
-                    <>
-                      {q.questionType === 'GRADE_1_8' && (
-                        <div className="grid grid-cols-8 gap-1">
-                          {[1,2,3,4,5,6,7,8].map((v) => (
-                            <button key={v} type="button"
-                              onClick={() => setEditAnswers((a) => ({ ...a, [q.id]: String(v) }))}
-                              className={cn('rounded border min-h-[36px] text-sm font-bold transition-all',
-                                String(editAnswers[q.id]) === String(v) ? 'bg-tps-orange text-white border-tps-orange' : 'border-gray-200 text-gray-600 hover:border-gray-400'
-                              )}>
-                              {v}
-                            </button>
+                <div key={q.id} className={cn('border-b border-gray-100 pb-3 last:border-0',
+                  q.questionType === 'REPEATING_SECTION' && 'bg-orange-50 rounded-lg px-3 py-2 border-orange-200'
+                )}>
+                  <p className="text-xs font-semibold text-gray-700 mb-2">
+                    <span className="text-tps-orange font-mono mr-1">{qLabel(qi)}</span>
+                    {q.label}
+                  </p>
+
+                  {/* REPEATING SECTION — special rendering */}
+                  {q.questionType === 'REPEATING_SECTION' ? (() => {
+                    const entries = parseRepeatEntries(rawVal)
+                    const subQs   = config?.subQuestions ?? []
+
+                    if (!editMode) {
+                      // Read-only: table of subject → scores
+                      return entries.length === 0 ? (
+                        <p className="text-gray-400 italic text-sm">No individual scores recorded</p>
+                      ) : (
+                        <table className="w-full text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-orange-100">
+                              <th className="px-2 py-1 text-left font-semibold text-gray-600">Person</th>
+                              {subQs.map((sq) => (
+                                <th key={sq.id} className="px-2 py-1 text-left font-semibold text-gray-600">{sq.label}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-orange-100">
+                            {entries.map((entry, ei) => (
+                              <tr key={ei} className="bg-white">
+                                <td className="px-2 py-1.5 font-medium">{entry.subject || '—'}</td>
+                                {subQs.map((sq) => (
+                                  <td key={sq.id} className={cn('px-2 py-1.5 font-mono font-bold',
+                                    entry[sq.id] === '8' ? 'text-red-600' :
+                                    parseInt(entry[sq.id] || '0') <= 2 ? 'text-green-600' : 'text-gray-700'
+                                  )}>
+                                    {entry[sq.id] || '—'}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )
+                    } else {
+                      // Edit mode: per-person grade inputs
+                      const currentEntries = editMode
+                        ? parseRepeatEntries(editAnswers[q.id])
+                        : entries
+                      const setEntry = (ei: number, sqId: string, val: string) => {
+                        const next = [...currentEntries]
+                        next[ei] = { ...next[ei], [sqId]: val }
+                        setEditAnswers((a) => ({ ...a, [q.id]: JSON.stringify(next) }))
+                      }
+                      return (
+                        <div className="space-y-3">
+                          {currentEntries.map((entry, ei) => (
+                            <div key={ei} className="card border border-orange-200 space-y-2 py-2">
+                              <p className="text-xs font-semibold text-tps-navy">{entry.subject || `Person ${ei + 1}`}</p>
+                              {subQs.map((sq) => (
+                                <div key={sq.id}>
+                                  <label className="text-[10px] text-gray-500 block mb-1">{sq.label}</label>
+                                  {sq.type === 'GRADE_1_8' ? (
+                                    <div className="grid grid-cols-8 gap-1">
+                                      {[1,2,3,4,5,6,7,8].map((v) => (
+                                        <button key={v} type="button"
+                                          onClick={() => setEntry(ei, sq.id, String(v))}
+                                          className={cn('rounded border min-h-[32px] text-xs font-bold transition-all',
+                                            entry[sq.id] === String(v)
+                                              ? 'bg-tps-orange text-white border-tps-orange'
+                                              : 'border-gray-200 text-gray-600 hover:border-gray-400'
+                                          )}>
+                                          {v}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <input type="text" value={entry[sq.id] ?? ''}
+                                      onChange={(e) => setEntry(ei, sq.id, e.target.value)}
+                                      className="field-input text-sm" />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
                           ))}
                         </div>
-                      )}
-                      {(q.questionType === 'NUMERIC' || q.questionType === 'NUMBER') && (
-                        <input type="number" value={String(editAnswers[q.id] ?? '')}
-                          onChange={(e) => setEditAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
-                          min={q.scaleMin ?? undefined} max={q.scaleMax ?? undefined}
-                          className="field-input w-32" />
-                      )}
-                      {q.questionType === 'MULTIPLE_CHOICE' && (
-                        <select value={String(editAnswers[q.id] ?? '')}
-                          onChange={(e) => setEditAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
-                          className="field-select text-sm">
-                          <option value="">—</option>
-                          {opts.map((o) => <option key={o} value={o}>{o}</option>)}
-                        </select>
-                      )}
-                      {q.questionType === 'TEXT' && (
-                        <textarea value={String(editAnswers[q.id] ?? '')}
-                          onChange={(e) => setEditAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
-                          rows={3} className="field-input resize-y text-sm" />
-                      )}
-                    </>
+                      )
+                    }
+                  })() : (
+                    /* Regular question rendering */
+                    !editMode ? (
+                      <p className={cn('text-sm', formatAnswer(rawVal, q) === '—' ? 'text-gray-400 italic' : 'text-gray-900')}>
+                        {formatAnswer(rawVal, q)}
+                      </p>
+                    ) : (
+                      <>
+                        {q.questionType === 'GRADE_1_8' && (
+                          <div className="grid grid-cols-8 gap-1">
+                            {[1,2,3,4,5,6,7,8].map((v) => (
+                              <button key={v} type="button"
+                                onClick={() => setEditAnswers((a) => ({ ...a, [q.id]: String(v) }))}
+                                className={cn('rounded border min-h-[36px] text-sm font-bold transition-all',
+                                  String(editAnswers[q.id]) === String(v) ? 'bg-tps-orange text-white border-tps-orange' : 'border-gray-200 text-gray-600 hover:border-gray-400'
+                                )}>
+                                {v}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {(q.questionType === 'NUMERIC' || q.questionType === 'NUMBER') && (
+                          <input type="number" value={String(editAnswers[q.id] ?? '')}
+                            onChange={(e) => setEditAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                            min={q.scaleMin ?? undefined} max={q.scaleMax ?? undefined}
+                            className="field-input w-32" />
+                        )}
+                        {q.questionType === 'MULTIPLE_CHOICE' && (
+                          <select value={String(editAnswers[q.id] ?? '')}
+                            onChange={(e) => setEditAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                            className="field-select text-sm">
+                            <option value="">—</option>
+                            {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        )}
+                        {q.questionType === 'TEXT' && (
+                          <textarea value={String(editAnswers[q.id] ?? '')}
+                            onChange={(e) => setEditAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                            rows={3} className="field-input resize-y text-sm" />
+                        )}
+                      </>
+                    )
                   )}
                 </div>
               )

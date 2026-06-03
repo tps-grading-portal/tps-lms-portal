@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { resetSandboxPinAction } from '../actions'
+import { resetSandboxPinAction, adminGrantAccessAction, adminRevokeAccessAction } from '../actions'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -18,15 +18,20 @@ interface Props {
     questions: { id: string; label: string; questionType: string; weight: number | null }[]
     invite: { recipientName: string; recipientEmail: string; formSubject: string } | null
   }
-  submitUrl:  string
-  resultsUrl: string
+  submitUrl:          string
+  resultsUrl:         string
+  allForms:           { id: string; title: string }[]
+  grantedToFormIds:   string[]   // forms that can read THIS form's results
 }
 
-export function AdminFormDetail({ form, submitUrl, resultsUrl }: Props) {
+export function AdminFormDetail({ form, submitUrl, resultsUrl, allForms, grantedToFormIds }: Props) {
   const [pinResult, setPinResult] = useState<{ type: string; newPin: string } | null>(null)
   const [resetting, setResetting] = useState(false)
   const [newPinInput, setNewPinInput] = useState('')
   const [expandPin, setExpandPin]    = useState<'submit' | 'results' | null>(null)
+  const [accessList, setAccessList]  = useState<string[]>(grantedToFormIds)
+  const [accessBusy, setAccessBusy]  = useState(false)
+  const [accessError, setAccessError] = useState('')
 
   const handlePinReset = async (type: 'submit' | 'results') => {
     setResetting(true)
@@ -125,6 +130,78 @@ export function AdminFormDetail({ form, submitUrl, resultsUrl }: Props) {
           </div>
         ))}
       </div>
+
+      {/* Cross-survey read access */}
+      {allForms.length > 0 && (
+        <div className="card border border-gray-200 space-y-3">
+          <div>
+            <h2 className="font-semibold text-gray-800">Cross-Form Results Access</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Grant another form&apos;s results-PIN-holders read access to <strong>this form&apos;s</strong> results.
+            </p>
+          </div>
+          {accessError && <p className="text-xs text-red-600">{accessError}</p>}
+
+          {/* Currently granted */}
+          {accessList.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Currently granted to:</p>
+              {accessList.map((grantedId) => {
+                const grantedForm = allForms.find((f) => f.id === grantedId)
+                return (
+                  <div key={grantedId} className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                    <span className="text-sm flex-1 text-green-800">{grantedForm?.title ?? grantedId}</span>
+                    <button
+                      disabled={accessBusy}
+                      className="text-xs text-red-400 hover:text-red-600"
+                      onClick={async () => {
+                        setAccessBusy(true); setAccessError('')
+                        const res = await adminRevokeAccessAction(grantedId, form.id)
+                        if (res.error) setAccessError(res.error)
+                        else setAccessList((l) => l.filter((id) => id !== grantedId))
+                        setAccessBusy(false)
+                      }}
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Grant new access */}
+          {allForms.filter((f) => !accessList.includes(f.id)).length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Grant access to:</p>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {allForms.filter((f) => !accessList.includes(f.id)).map((f) => (
+                  <div key={f.id} className="flex items-center gap-2 py-1.5 border-b border-gray-100 last:border-0">
+                    <span className="text-sm flex-1 text-gray-700">{f.title}</span>
+                    <button
+                      disabled={accessBusy}
+                      className="text-xs text-tps-orange hover:underline"
+                      onClick={async () => {
+                        setAccessBusy(true); setAccessError('')
+                        const res = await adminGrantAccessAction(f.id, form.id)
+                        if (res.error) setAccessError(res.error)
+                        else setAccessList((l) => [...l, f.id])
+                        setAccessBusy(false)
+                      }}
+                    >
+                      Grant
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {allForms.filter((f) => !accessList.includes(f.id)).length === 0 && accessList.length === allForms.length && (
+            <p className="text-xs text-gray-400">All other forms have been granted access.</p>
+          )}
+        </div>
+      )}
 
       {/* Questions summary */}
       <div>

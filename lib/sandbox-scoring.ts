@@ -152,8 +152,9 @@ export interface RepeatSubQuestion {
 }
 
 export interface RepeatingSectionConfig {
-  subQuestions:  RepeatSubQuestion[]
-  subjectSource: 'freetext' | 'predefined'
+  subQuestions:   RepeatSubQuestion[]
+  subjectSource:  'freetext' | 'predefined'
+  predefinedList?: string[]  // section-level override of form predefinedSubjects
 }
 
 export interface RepeatEntry {

@@ -59,7 +59,7 @@ export default async function SandboxSubmitPage({ params, searchParams }: PagePr
           </div>
         </div>
         {editId && (
-          <span className="text-xs text-tps-gold border border-tps-gold px-2 py-1 rounded-full">Editing submission</span>
+          <span className="text-xs text-white border border-white px-2 py-1 rounded-full">Editing submission</span>
         )}
       </header>
       <div className="max-w-2xl mx-auto px-4 py-6">

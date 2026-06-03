@@ -270,6 +270,10 @@ function RepeatingSectionInput({
 }) {
   const config = q.options as unknown as RepeatingSectionConfig | null
   const subQs  = config?.subQuestions ?? []
+  // Section-level list takes precedence over form-level predefined subjects
+  const effectiveSubjects = (config?.predefinedList && config.predefinedList.length > 0)
+    ? config.predefinedList
+    : predefinedSubjects
 
   // Parse current entries from answers state
   let entries: RepeatEntry[] = []
@@ -292,8 +296,8 @@ function RepeatingSectionInput({
       </div>
 
       {/* Pre-defined subject list: render all at once */}
-      {config?.subjectSource === 'predefined' && predefinedSubjects.length > 0 ? (
-        predefinedSubjects.map((subject, si) => {
+      {config?.subjectSource === 'predefined' && effectiveSubjects.length > 0 ? (
+        effectiveSubjects.map((subject, si) => {
           const entry = entries.find((e) => e.subject === subject) ?? { subject }
           const entryIdx = entries.findIndex((e) => e.subject === subject)
           const handleEntry = (field: string, val: string) => {

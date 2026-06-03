@@ -12,14 +12,21 @@ interface PageProps { params: Promise<{ formId: string }> }
 export default async function SandboxFormDetailPage({ params }: PageProps) {
   const { formId } = await params
 
-  const form = await db.sandboxForm.findUnique({
-    where:   { id: formId },
-    include: {
-      questions:   { orderBy: { sortOrder: 'asc' } },
-      invite:      true,
-      _count:      { select: { submissions: true } },
-    },
-  })
+  const [form, allForms] = await Promise.all([
+    db.sandboxForm.findUnique({
+      where:   { id: formId },
+      include: {
+        questions:     { orderBy: { sortOrder: 'asc' } },
+        invite:        true,
+        _count:        { select: { submissions: true } },
+        accessTargets: { select: { grantedToFormId: true } },
+      },
+    }),
+    db.sandboxForm.findMany({
+      select: { id: true, title: true },
+      orderBy: { createdAt: 'desc' },
+    }),
+  ])
   if (!form) notFound()
 
   const headersList = await headers()
@@ -52,6 +59,8 @@ export default async function SandboxFormDetailPage({ params }: PageProps) {
         form={form}
         submitUrl={submitUrl}
         resultsUrl={resultsUrl}
+        allForms={allForms.filter((f) => f.id !== formId)}
+        grantedToFormIds={form.accessTargets.map((a) => a.grantedToFormId)}
       />
     </div>
   )

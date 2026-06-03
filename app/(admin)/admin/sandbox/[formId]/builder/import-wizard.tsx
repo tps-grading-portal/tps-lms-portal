@@ -33,11 +33,33 @@ const CONFIDENCE_BADGE = (c: number) =>
 
 export function ImportWizard({ onImport, onClose, creatorToken }: Props) {
   const [step,       setStep]       = useState<'upload' | 'review'>('upload')
+  const [uploadTab,  setUploadTab]  = useState<'file' | 'paste'>('file')
+  const [pastedText, setPastedText] = useState('')
   const [questions,  setQuestions]  = useState<(ExtractedQuestion & { selected: boolean })[]>([])
   const [parsing,    setParsing]    = useState(false)
   const [parseError, setParseError] = useState('')
   const [filename,   setFilename]   = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const handlePastedText = () => {
+    if (!pastedText.trim()) { setParseError('Please paste some text first.'); return }
+    setParsing(true)
+    setParseError('')
+    setFilename('pasted text')
+    try {
+      const extracted = extractQuestionsFromText(pastedText)
+      if (extracted.length === 0) {
+        setParseError('No questions detected. Make sure questions are numbered (e.g. "1. Question text") or end with a "?".')
+        setParsing(false)
+        return
+      }
+      setQuestions(extracted.map((q) => ({ ...q, selected: true })))
+      setStep('review')
+    } catch (err) {
+      setParseError(String(err))
+    }
+    setParsing(false)
+  }
 
   const handleFile = async (file: File) => {
     setParseError('')
@@ -48,19 +70,23 @@ export function ImportWizard({ onImport, onClose, creatorToken }: Props) {
       let extracted: ExtractedQuestion[] = []
 
       if (file.name.endsWith('.pdf')) {
-        // Server-side PDF extraction
-        const fd = new FormData()
-        fd.append('file', file)
-        const headers: Record<string, string> = {}
-        if (creatorToken) headers['x-creator-token'] = creatorToken
-
-        const res = await fetch('/api/sandbox/extract', { method: 'POST', body: fd, headers })
-        if (!res.ok) {
-          const err = await res.json()
-          throw new Error(err.error ?? 'PDF extraction failed')
+        // Client-side PDF extraction via pdfjs-dist (avoids Vercel serverless issues)
+        const buffer = await file.arrayBuffer()
+        const pdfjsLib = await import('pdfjs-dist')
+        // Use CDN worker matching the installed version
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`
+        const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
+        let pdfText = ''
+        for (let p = 1; p <= pdf.numPages; p++) {
+          const page    = await pdf.getPage(p)
+          const content = await page.getTextContent()
+          pdfText += content.items.map((item) => ('str' in item ? item.str : '')).join(' ') + '\n'
         }
-        const { text } = await res.json()
-        extracted = extractQuestionsFromText(text)
+        if (!pdfText.trim()) {
+          throw new Error('No text could be extracted. This PDF may be a scanned image — try copying and pasting the text instead using the "Paste Text" tab.')
+        }
+        extracted = extractQuestionsFromText(pdfText)
 
       } else {
         // Client-side Excel/CSV extraction
@@ -116,10 +142,49 @@ export function ImportWizard({ onImport, onClose, creatorToken }: Props) {
         {/* Step: Upload */}
         {step === 'upload' && (
           <div className="p-6 space-y-4 overflow-y-auto">
+            {/* Tab switcher */}
+            <div className="flex border-b border-gray-200 gap-1">
+              {(['file', 'paste'] as const).map((tab) => (
+                <button key={tab} onClick={() => { setUploadTab(tab); setParseError('') }}
+                  className={cn('px-4 py-2 text-sm font-medium border-b-2 transition-colors',
+                    uploadTab === tab ? 'border-tps-orange text-tps-orange' : 'border-transparent text-gray-500 hover:text-gray-800'
+                  )}>
+                  {tab === 'file' ? '📂 Upload File' : '📋 Paste Text'}
+                </button>
+              ))}
+            </div>
+
+            {/* Paste Text tab */}
+            {uploadTab === 'paste' && (
+              <div className="space-y-3">
+                <div className="card border border-amber-200 bg-amber-50 text-sm text-amber-800">
+                  <p className="font-semibold mb-1">Best option for PDFs that won&apos;t upload</p>
+                  <p>Open your document, select all text (Ctrl+A / Cmd+A), copy (Ctrl+C), and paste below. Works with any text document — Word, Google Docs, PDF viewer, etc.</p>
+                </div>
+                <textarea
+                  value={pastedText}
+                  onChange={(e) => { setPastedText(e.target.value); setParseError('') }}
+                  placeholder={"Paste your document text here…\n\n1. What is your primary track?\n2. Rate your experience from 1-5\n   a) Very Poor\n   b) Poor\n   c) Average\n   d) Good\n   e) Excellent\n3. Additional comments:"}
+                  rows={12}
+                  className="field-input resize-y text-sm font-mono w-full"
+                />
+                {parseError && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{parseError}</div>}
+                <button
+                  onClick={handlePastedText}
+                  disabled={parsing || !pastedText.trim()}
+                  className="btn-primary w-full"
+                >
+                  {parsing ? 'Extracting questions…' : 'Extract Questions from Text'}
+                </button>
+              </div>
+            )}
+
+            {/* File upload tab */}
+            {uploadTab === 'file' && (<>
             <div className="card border border-blue-200 bg-blue-50 text-sm text-blue-800 space-y-1">
-              <p className="font-semibold">Supported file types</p>
-              <p>Excel (.xlsx, .xls, .csv) — parsed client-side, instant</p>
-              <p>PDF (.pdf) — text extracted server-side; scanned image PDFs won&apos;t work</p>
+              <p className="font-semibold">Supported formats</p>
+              <p>Excel (.xlsx, .xls, .csv) — parsed instantly in your browser</p>
+              <p>PDF (.pdf) — text-based PDFs only (not scanned images)</p>
             </div>
 
             <div
@@ -162,6 +227,7 @@ export function ImportWizard({ onImport, onClose, creatorToken }: Props) {
               <p>• For scales, include range in the question: &quot;Rate from 1 to 5&quot; or &quot;(1-8 scale)&quot;</p>
               <p>• Use section headers in ALL CAPS or followed by a colon to group questions</p>
             </div>
+          </>)}
           </div>
         )}
 

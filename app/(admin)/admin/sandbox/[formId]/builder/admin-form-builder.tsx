@@ -22,20 +22,21 @@ interface SubQuestionDraft {
 }
 
 interface QuestionDraft {
-  id?:           string
-  questionType:  QType
-  label:         string
-  description:   string
-  sectionLabel:  string
-  options:       string
-  scaleMin:      string
-  scaleMax:      string
-  pointMap:      Record<string, number>
-  weight:        string
-  isRequired:    boolean
+  id?:             string
+  questionType:    QType
+  label:           string
+  description:     string
+  sectionLabel:    string
+  options:         string
+  scaleMin:        string
+  scaleMax:        string
+  pointMap:        Record<string, number>
+  weight:          string
+  isRequired:      boolean
   // Repeating section only:
-  subQuestions:  SubQuestionDraft[]
-  subjectSource: 'freetext' | 'predefined'
+  subQuestions:    SubQuestionDraft[]
+  subjectSource:   'freetext' | 'predefined'
+  predefinedList:  string   // newline-separated, section-specific subject names
 }
 
 interface ExistingForm {
@@ -68,7 +69,7 @@ const emptyQuestion = (): QuestionDraft => ({
   questionType: 'GRADE_1_8', label: '', description: '', sectionLabel: '',
   options: '', scaleMin: '1', scaleMax: '5',
   pointMap: autoLinearPointMap(1, 5), weight: '', isRequired: true,
-  subQuestions: [], subjectSource: 'freetext',
+  subQuestions: [], subjectSource: 'freetext', predefinedList: '',
 })
 
 const emptyRepeatSection = (): QuestionDraft => ({
@@ -77,28 +78,29 @@ const emptyRepeatSection = (): QuestionDraft => ({
   description: 'Grade each person individually.',
   sectionLabel: '', options: '', scaleMin: '1', scaleMax: '8',
   pointMap: {}, weight: '20', isRequired: true,
-  subjectSource: 'freetext',
+  subjectSource: 'freetext', predefinedList: '',
   subQuestions: [{ id: `sq_${Date.now()}`, label: 'Individual Score', type: 'GRADE_1_8', subWeight: '100' }],
 })
 
 function toQuestionDrafts(form: ExistingForm): QuestionDraft[] {
   return form.questions.map((q) => {
-    const opts = q.options as { subQuestions?: SubQuestionDraft[]; subjectSource?: string } | null
+    const opts = q.options as { subQuestions?: SubQuestionDraft[]; subjectSource?: string; predefinedList?: string[] } | null
     return {
-    id:           q.id,
-    questionType: q.questionType as QType,
-    label:        q.label,
-    description:  q.description ?? '',
-    sectionLabel: q.sectionLabel ?? '',
-    options:      q.questionType === 'REPEATING_SECTION' ? '' : (Array.isArray(q.options) ? (q.options as string[]).join(', ') : ''),
-    scaleMin:     String(q.scaleMin ?? 1),
-    scaleMax:     String(q.scaleMax ?? 5),
-    pointMap:     (q.pointMap as Record<string, number>) ?? autoLinearPointMap(q.scaleMin ?? 1, q.scaleMax ?? 5),
-    weight:       q.weight !== null ? String(Math.round(q.weight * 100)) : '',
-    isRequired:   q.isRequired,
-    subQuestions: opts?.subQuestions ?? [],
-    subjectSource: (opts?.subjectSource as 'freetext' | 'predefined') ?? 'freetext',
-  }
+      id:             q.id,
+      questionType:   q.questionType as QType,
+      label:          q.label,
+      description:    q.description ?? '',
+      sectionLabel:   q.sectionLabel ?? '',
+      options:        q.questionType === 'REPEATING_SECTION' ? '' : (Array.isArray(q.options) ? (q.options as string[]).join(', ') : ''),
+      scaleMin:       String(q.scaleMin ?? 1),
+      scaleMax:       String(q.scaleMax ?? 5),
+      pointMap:       (q.pointMap as Record<string, number>) ?? autoLinearPointMap(q.scaleMin ?? 1, q.scaleMax ?? 5),
+      weight:         q.weight !== null ? String(Math.round(q.weight * 100)) : '',
+      isRequired:     q.isRequired,
+      subQuestions:   opts?.subQuestions ?? [],
+      subjectSource:  (opts?.subjectSource as 'freetext' | 'predefined') ?? 'freetext',
+      predefinedList: Array.isArray(opts?.predefinedList) ? opts.predefinedList.join('\n') : '',
+    }
   })
 }
 
@@ -144,10 +146,11 @@ export function AdminFormBuilder({ form, staffMembers }: Props) {
       pointMap:      (eq.scaleMin !== null && eq.scaleMax !== null)
         ? autoLinearPointMap(eq.scaleMin, eq.scaleMax)
         : {},
-      weight:        '',
-      isRequired:    true,
-      subQuestions:  [],
-      subjectSource: 'freetext' as const,
+      weight:          '',
+      isRequired:      true,
+      subQuestions:    [],
+      subjectSource:   'freetext' as const,
+      predefinedList:  '',
     }))
     setQuestions((qs) => [...qs, ...newQs])
     setSaved(false)
@@ -186,7 +189,10 @@ export function AdminFormBuilder({ form, staffMembers }: Props) {
                 id: sq.id, label: sq.label, type: sq.type,
                 subWeight: parseFloat(sq.subWeight) / 100 || 1,
               })),
-              subjectSource: q.subjectSource,
+              subjectSource:  q.subjectSource,
+              predefinedList: q.predefinedList
+                ? q.predefinedList.split('\n').map((s) => s.trim()).filter(Boolean)
+                : undefined,
             }
           : ['MULTIPLE_CHOICE', 'CHECKBOX'].includes(q.questionType)
             ? q.options.split(',').map((s) => s.trim()).filter(Boolean)
@@ -344,6 +350,7 @@ export function AdminFormBuilder({ form, staffMembers }: Props) {
               <RepeatingSectionEditor
                 q={q}
                 scoring={scoring}
+                formPredefined={predefined}
                 onChange={(patch) => updateQ(i, patch)}
               />
             ) : (
@@ -457,11 +464,12 @@ export function AdminFormBuilder({ form, staffMembers }: Props) {
 // ── Repeating Section Editor ──────────────────────────────────────────────────
 
 function RepeatingSectionEditor({
-  q, scoring, onChange,
+  q, scoring, formPredefined, onChange,
 }: {
-  q:        QuestionDraft
-  scoring:  boolean
-  onChange: (p: Partial<QuestionDraft>) => void
+  q:              QuestionDraft
+  scoring:        boolean
+  formPredefined: string   // form-level predefined subjects (newline-separated)
+  onChange:       (p: Partial<QuestionDraft>) => void
 }) {
   const addSQ = () => onChange({
     subQuestions: [...q.subQuestions, { id: `sq_${Date.now()}`, label: '', type: 'GRADE_1_8', subWeight: '100' }],
@@ -498,10 +506,39 @@ function RepeatingSectionEditor({
           <select value={q.subjectSource} onChange={(e) => onChange({ subjectSource: e.target.value as 'freetext' | 'predefined' })}
             className="field-select text-sm">
             <option value="freetext">Grader types each person&apos;s name</option>
-            <option value="predefined">From form&apos;s pre-defined subject list</option>
+            <option value="predefined">Pre-defined list (set below)</option>
           </select>
         </div>
       </div>
+
+      {/* Section-level predefined list */}
+      {q.subjectSource === 'predefined' && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="field-label text-xs mb-0">People to grade (one per line)</label>
+            {formPredefined.trim() && (
+              <button
+                type="button"
+                onClick={() => onChange({ predefinedList: formPredefined })}
+                className="text-xs text-tps-orange hover:underline"
+                title="Copy the form-level subject list into this section"
+              >
+                Import from form subjects
+              </button>
+            )}
+          </div>
+          <textarea
+            value={q.predefinedList}
+            onChange={(e) => onChange({ predefinedList: e.target.value })}
+            rows={5}
+            placeholder={"Capt Smith\nMaj Jones\nLt Col Davis"}
+            className="field-input resize-y font-mono text-sm"
+          />
+          <p className="text-[10px] text-gray-400 mt-1">
+            These names appear on the submission form so graders select from them.
+          </p>
+        </div>
+      )}
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className="field-label text-xs mb-0">Questions repeated per person</label>
