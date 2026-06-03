@@ -5,12 +5,11 @@ import { auth } from '@/lib/auth'
 import { generateCreatorToken, generateFormSlugs, hashPin, generateSlug } from '@/lib/sandbox-auth'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
-import { Resend } from 'resend'
 
 // ── Send creator invite ───────────────────────────────────────────────────────
 
 export type InviteResult =
-  | { success: true; linkToken: string; pin: string; emailSent: boolean; recipientEmail: string; emailError?: string }
+  | { success: true; linkToken: string; pin: string }
   | { success: false; error: string }
 
 export async function createCreatorInviteAction(formData: FormData): Promise<InviteResult> {
@@ -41,76 +40,8 @@ export async function createCreatorInviteAction(formData: FormData): Promise<Inv
     },
   })
 
-  // Send invite email via Resend
-  const baseUrl    = process.env.NEXTAUTH_URL ?? 'http://localhost:3000'
-  const creatorUrl = `${baseUrl}/creator/${linkToken}`
-
-  let emailSent  = false
-  let emailError = ''
-  if (process.env.RESEND_API_KEY) {
-    const resend = new Resend(process.env.RESEND_API_KEY)
-    const { data, error } = await resend.emails.send({
-      from:    'TPS Test Foundations <onboarding@resend.dev>',
-      to:      recipientEmail,
-      subject: `You've been invited to build a form — ${formSubject}`,
-      html: `
-        <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1B2A4A">
-          <div style="background:#1B2A4A;padding:20px 24px;border-bottom:3px solid #F26522">
-            <p style="color:#FFFFFF;font-weight:700;font-size:13px;letter-spacing:2px;text-transform:uppercase;margin:0">
-              USAF Test Pilot School — Test Foundations
-            </p>
-          </div>
-          <div style="padding:32px 24px;background:#ffffff">
-            <h1 style="font-size:20px;margin:0 0 8px">Hi ${recipientName},</h1>
-            <p style="color:#374151;line-height:1.6;margin:0 0 24px">
-              You've been invited to build a survey form for:<br/>
-              <strong style="color:#1B2A4A">${formSubject}</strong>
-            </p>
-
-            <div style="background:#FFF7ED;border:1px solid #F26522;border-radius:8px;padding:20px 24px;margin:0 0 24px">
-              <p style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#F26522;margin:0 0 12px">
-                Your Access Details — Save These
-              </p>
-              <p style="margin:0 0 8px;font-size:14px">
-                <strong>Builder Link:</strong><br/>
-                <a href="${creatorUrl}" style="color:#F26522;word-break:break-all">${creatorUrl}</a>
-              </p>
-              <p style="margin:0;font-size:14px">
-                <strong>PIN:</strong>
-                <span style="font-family:monospace;font-size:22px;font-weight:700;letter-spacing:4px;color:#1B2A4A;margin-left:8px">${pin}</span>
-              </p>
-            </div>
-
-            <p style="color:#374151;line-height:1.6;margin:0 0 8px;font-size:14px">
-              Click the link above, enter your PIN, and you'll be taken directly to the form builder.
-              You can return to your form at any time using the same link and PIN.
-            </p>
-            <p style="color:#6B7280;font-size:12px;margin:24px 0 0">
-              Sent by TPS Test Foundations · USAF Test Pilot School
-            </p>
-          </div>
-        </div>
-      `,
-    })
-    if (error) {
-      emailError = (error as { message?: string }).message ?? JSON.stringify(error)
-      console.error('[Resend] email send failed:', emailError)
-    } else {
-      console.log('[Resend] email sent, id:', data?.id)
-      emailSent = true
-    }
-  } else {
-    emailError = 'RESEND_API_KEY not configured'
-    console.warn('[Resend] RESEND_API_KEY not set — skipping email')
-  }
-
-  await db.sandboxCreatorInvite.update({
-    where: { linkToken },
-    data:  { emailSent },
-  })
-
   revalidatePath('/admin/sandbox')
-  return { success: true, linkToken, pin, emailSent, recipientEmail, emailError: emailError || undefined }
+  return { success: true, linkToken, pin }
 }
 
 // ── Delete / revoke a creator invite and all its content ────────────────────
