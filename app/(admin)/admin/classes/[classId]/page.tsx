@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { TRACK_LABELS } from '@/lib/utils'
 import { PASSING_SCORE } from '@/lib/constants'
 import { finalizeSessionAction } from '@/app/(chair)/chair/actions'
+import { PinManager } from '../pin-manager'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Class Detail' }
@@ -15,7 +16,7 @@ interface PageProps {
 export default async function ClassDetailPage({ params }: PageProps) {
   const { classId } = await params
 
-  const [cls, sessions, students, studentSurveys] = await Promise.all([
+  const [cls, sessions, students, studentSurveys, accessRecords] = await Promise.all([
     db.class.findUnique({ where: { id: classId }, select: { id: true, name: true, isActive: true, archivedAt: true, createdAt: true } }),
     db.gradingSession.findMany({
       where: { classId },
@@ -38,6 +39,7 @@ export default async function ClassDetailPage({ params }: PageProps) {
       take: 10,
       select: { id: true, submittedAt: true, responses: true },
     }),
+    db.classAccess.findMany({ where: { classId }, select: { role: true } }),
   ])
 
   if (!cls) notFound()
@@ -165,6 +167,20 @@ export default async function ClassDetailPage({ params }: PageProps) {
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* Room PINs */}
+      <section>
+        <h2 className="text-lg font-semibold text-gray-800 mb-3">Room PINs</h2>
+        <p className="text-sm text-gray-500 mb-3">
+          PINs are stored as secure hashes — existing values cannot be retrieved.
+          Use Rotate to set a new PIN; it will be displayed once.
+        </p>
+        <PinManager
+          classId={classId}
+          graderPinSet={accessRecords.some((a) => a.role === 'GRADER')}
+          chairPinSet={accessRecords.some((a) => a.role === 'PANEL_CHAIR')}
+        />
       </section>
 
       {/* Students */}

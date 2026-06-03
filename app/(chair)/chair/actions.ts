@@ -6,6 +6,33 @@ import { processSession } from '@/lib/session-processor'
 import { getSessionDisplayData } from '@/lib/session-processor'
 import { z } from 'zod'
 
+// ── Panel Chair: delete an entire grader assessment ──────────────────────────
+
+export async function deleteAssessmentAction(
+  assessmentId: string,
+): Promise<EditGradeResult> {
+  const token = await validatePinToken('PANEL_CHAIR')
+  if (!token) return { error: 'Session expired. Please re-authenticate.' }
+
+  const assessment = await db.graderAssessment.findUnique({
+    where: { id: assessmentId },
+    include: { session: { select: { id: true, classId: true } } },
+  })
+  if (!assessment)                                        return { error: 'Assessment not found.' }
+  if (assessment.session.classId !== token.classId)      return { error: 'Unauthorized — wrong class.' }
+
+  const sessionId = assessment.session.id
+
+  // CriterionGrades cascade-delete via onDelete: Cascade on GraderAssessment
+  await db.graderAssessment.delete({ where: { id: assessmentId } })
+
+  // Reprocess — session may revert to OPEN if grader count drops below minimum
+  await processSession(sessionId)
+
+  const data = await getSessionDisplayData(token.classId)
+  return { success: true, data }
+}
+
 // ── Panel Chair: edit a grader's criterion score ──────────────────────────────
 
 const editGradeSchema = z.object({

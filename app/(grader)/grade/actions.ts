@@ -141,5 +141,13 @@ export async function submitGradesAction(
   })
 
   await processSession(session.id)
-  redirect(`/grade?submitted=1&sessionId=${session.id}&isRetake=${session.isRetake ? '1' : '0'}`)
+  // Pass back identifiers so the success screen can offer an "Edit My Submission" link
+  redirect(
+    `/grade?submitted=1` +
+    `&sessionId=${session.id}` +
+    `&isRetake=${session.isRetake ? '1' : '0'}` +
+    `&editStudentId=${studentId}` +
+    `&editScenarioId=${scenarioId}` +
+    `&editStaffMemberId=${staffMemberId}`
+  )
 }

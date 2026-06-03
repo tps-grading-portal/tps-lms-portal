@@ -10,12 +10,15 @@ export const metadata: Metadata = { title: 'Enter Grades' }
 
 interface PageProps {
   searchParams: Promise<{
-    submitted?:      string
-    sessionId?:      string
-    isRetake?:       string
-    studentId?:      string
-    scenarioId?:     string
-    staffMemberId?:  string
+    submitted?:       string
+    sessionId?:       string
+    isRetake?:        string
+    editStudentId?:   string
+    editScenarioId?:  string
+    editStaffMemberId?: string
+    studentId?:       string
+    scenarioId?:      string
+    staffMemberId?:   string
   }>
 }
 
@@ -76,7 +79,13 @@ export default async function GraderPage({ searchParams }: PageProps) {
     return (
       <main className="min-h-screen bg-gray-50 overflow-hidden">
         <Header className={cls?.name} />
-        <SuccessScreen className={cls?.name} isRetake={params.isRetake === '1'} />
+        <SuccessScreen
+          className={cls?.name}
+          isRetake={params.isRetake === '1'}
+          editStudentId={params.editStudentId}
+          editScenarioId={params.editScenarioId}
+          editStaffMemberId={params.editStaffMemberId}
+        />
       </main>
     )
   }

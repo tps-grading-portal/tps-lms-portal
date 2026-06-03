@@ -10,6 +10,18 @@ import {
 import { cn, TRACK_LABELS } from '@/lib/utils'
 import { GRADE_LABELS } from '@/lib/constants'
 
+// ── Same 3-state cell coloring as Chair dashboard ─────────────────────────────
+function cellClass(gradeValue: number, isDiscontinuity: boolean, rowHasDisc: boolean): string {
+  if (rowHasDisc) {
+    return isDiscontinuity
+      ? 'bg-amber-300 text-amber-900 font-bold'
+      : 'bg-gray-100 text-gray-400'
+  }
+  return gradeValue === 8
+    ? 'bg-red-100 text-red-700 font-bold'
+    : 'bg-green-100 text-green-800'
+}
+
 type SessionData   = Awaited<ReturnType<typeof getAdminSessionData>>
 type SessionRow    = SessionData['sessions'][number]
 type CriterionRow  = SessionData['criteria'][number]
@@ -269,20 +281,17 @@ export function AdminSessionGrid({ initialData, classId }: Props) {
                     }))
                     const rowHasDisc = rowGrades.some((r) => r.grade?.isDiscontinuity)
 
+                    const rowHasFail = rowGrades.some((r) => r.grade?.gradeValue === 8)
+
                     return (
-                      <tr key={criterion.id}
-                        className={cn(
-                          rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50',
-                          rowHasDisc && 'bg-amber-50',
-                        )}>
-                        {/* Criterion label — sticky */}
+                      <tr key={criterion.id} className="bg-white">
+                        {/* Criterion label — sticky, full name */}
                         <td className={cn(
-                          'px-3 py-2 border-r border-gray-200 sticky left-0 z-10',
-                          rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50',
-                          rowHasDisc && 'bg-amber-50',
+                          'px-3 py-2 border-r border-gray-100 sticky left-0 z-10 transition-colors',
+                          rowHasDisc ? 'bg-white' : rowHasFail ? 'bg-red-50' : 'bg-green-50',
                         )}>
-                          <span className="font-bold text-tps-blue">{criterion.code}</span>
-                          {rowHasDisc && <span className="ml-1 text-amber-600">⚠</span>}
+                          <span className="font-bold text-tps-blue text-xs">{criterion.code}</span>
+                          <span className="text-gray-600 ml-1.5 text-xs leading-snug">{criterion.name}</span>
                         </td>
 
                         {/* Grade cells */}
@@ -297,13 +306,13 @@ export function AdminSessionGrid({ initialData, classId }: Props) {
 
                           const isDisc    = grade.isDiscontinuity
                           const wasEdited = grade.editedBy === 'PANEL_CHAIR'
-                          const canEdit   = !isLocked // editable when session is not locked
+                          const canEdit   = !isLocked
 
                           return (
                             <td key={assessmentId}
                               className={cn(
-                                'px-1 py-1 text-center border border-gray-100',
-                                isDisc ? 'bg-grade-discontinuity' : gradeBg(grade.gradeValue),
+                                'px-1 py-1 text-center border border-gray-100 transition-colors',
+                                cellClass(grade.gradeValue, isDisc, rowHasDisc),
                               )}>
                               <button
                                 type="button"
