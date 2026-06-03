@@ -298,3 +298,112 @@ model InstructorSurveyResponse {
 
   @@map("instructor_survey_responses")
 }
+
+// ============================================================
+// THE SANDBOX — completely independent from Comp Oral
+// ============================================================
+
+enum SandboxQuestionType {
+  GRADE_1_8       // TPS 1-8 scale with WAA→Fail labels
+  NUMERIC         // custom min–max scale, admin-defined point map
+  MULTIPLE_CHOICE // single answer from a list
+  CHECKBOX        // multiple answers from a list
+  TEXT            // free-text response
+  NUMBER          // open numeric entry
+}
+
+enum SandboxMode {
+  SURVEY  // everyone submits for themselves (no subject field)
+  GRADER  // evaluators rate a named subject
+}
+
+enum SandboxSubjectEntry {
+  FREE_TEXT
+  PREDEFINED_LIST
+}
+
+enum SandboxGraderEntry {
+  FREE_TEXT
+  STAFF_LIST
+}
+
+// Creator invite — admin generates and emails to someone who wants to build a form
+model SandboxCreatorInvite {
+  id             String    @id @default(cuid())
+  recipientName  String
+  recipientEmail String
+  formSubject    String    // admin label, e.g. "Mission Systems Check — Maj. Smith"
+  linkToken      String    @unique
+  pinHash        String
+  sentAt         DateTime  @default(now())
+  sentByAdmin    String
+  isActive       Boolean   @default(true)
+  emailSent      Boolean   @default(false)
+
+  form SandboxForm?
+
+  @@map("sandbox_creator_invites")
+}
+
+// The form itself — created by a creator via their invite link (or directly by admin)
+model SandboxForm {
+  id                 String              @id @default(cuid())
+  inviteId           String?             @unique
+  invite             SandboxCreatorInvite? @relation(fields: [inviteId], references: [id])
+  title              String
+  description        String?             @db.Text
+  mode               SandboxMode         @default(SURVEY)
+  subjectEntry       SandboxSubjectEntry @default(FREE_TEXT)
+  graderEntry        SandboxGraderEntry  @default(FREE_TEXT)
+  predefinedSubjects Json?               // string[] — if subjectEntry = PREDEFINED_LIST
+  scoringEnabled     Boolean             @default(false)
+  // Each form has two independent PIN-protected access points
+  submitSlug         String              @unique
+  resultsSlug        String              @unique
+  submitPinHash      String
+  resultsPinHash     String
+  samePinWarning     Boolean             @default(false) // true if submit == results PIN
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+
+  questions   SandboxQuestion[]
+  submissions SandboxSubmission[]
+
+  @@map("sandbox_forms")
+}
+
+// A question on a sandbox form
+model SandboxQuestion {
+  id            String               @id @default(cuid())
+  formId        String
+  form          SandboxForm          @relation(fields: [formId], references: [id], onDelete: Cascade)
+  questionType  SandboxQuestionType
+  label         String               // question text shown to respondent
+  description   String?              @db.Text
+  sectionLabel  String?              // optional section grouping header
+  options       Json?                // string[] for MC/checkbox
+  scaleMin      Int?                 // NUMERIC: minimum value
+  scaleMax      Int?                 // NUMERIC: maximum value
+  // pointMap: { "1": 100, "2": 80, ... } — linear auto-generated, overridable
+  // For GRADE_1_8: uses standard NUMERIC_MAP
+  pointMap      Json?
+  weight        Float?               // fraction (0-1) used when scoringEnabled; must sum to 1 across all weighted questions
+  isRequired    Boolean              @default(true)
+  sortOrder     Int
+
+  @@map("sandbox_questions")
+}
+
+// A single form submission
+model SandboxSubmission {
+  id           String      @id @default(cuid())
+  formId       String
+  form         SandboxForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  subjectName  String?     // null in SURVEY mode or if not collected
+  graderName   String?
+  answers      Json        // { questionId: value (string | string[] | number) }
+  totalScore   Float?      // null if scoringEnabled=false
+  submittedAt  DateTime    @default(now())
+
+  @@map("sandbox_submissions")
+}

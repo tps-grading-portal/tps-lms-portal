@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { href: '/admin/surveys',     label: 'Surveys'    },
   { href: '/admin/import',      label: 'Import'     },
   { href: '/admin/settings',    label: 'Settings'   },
+  { href: '/admin/sandbox',     label: '🧪 Sandbox'  },
 ]
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
