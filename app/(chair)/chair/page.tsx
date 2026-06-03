@@ -27,7 +27,7 @@ export default async function ChairPage() {
   return (
     <main className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-tps-navy text-white px-4 h-14 flex items-center justify-between sticky top-0 z-20">
+      <header className="bg-tps-navy text-white px-4 h-14 flex items-center justify-between sticky top-0 z-20 border-b-2 border-tps-orange">
         <div className="flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/grad-patch.png" alt="TPS" width={28} height={28} className="object-contain" />

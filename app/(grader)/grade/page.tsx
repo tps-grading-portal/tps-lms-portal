@@ -139,7 +139,7 @@ export default async function GraderPage({ searchParams }: PageProps) {
 
 function Header({ className }: { className?: string }) {
   return (
-    <header className="bg-tps-navy text-white px-4 h-14 flex items-center justify-between sticky top-0 z-10">
+    <header className="bg-tps-navy text-white px-4 h-14 flex items-center justify-between sticky top-0 z-10 border-b-2 border-tps-orange">
       <div className="flex items-center gap-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/grad-patch.png" alt="TPS" width={28} height={28} className="object-contain" />

@@ -89,7 +89,7 @@ export function SurveyForm({
         return (
           <div key={q.id}>
             {sectionTitle && (
-              <div className="border-t-2 border-tps-blue pt-6 mb-4">
+              <div className="pt-6 mb-4 pl-4 border-l-4 border-tps-orange">
                 <h2 className="text-base font-bold text-tps-navy">{sectionTitle}</h2>
               </div>
             )}

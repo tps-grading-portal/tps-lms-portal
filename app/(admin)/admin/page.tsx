@@ -151,13 +151,20 @@ function StatCard({
   color: 'blue' | 'gray' | 'amber' | 'green'
 }) {
   const colors = {
-    blue:  'bg-blue-50 border-blue-200 text-blue-700',
-    gray:  'bg-gray-50 border-gray-200 text-gray-700',
+    blue:  'bg-blue-50  border-blue-200  text-blue-700',
+    gray:  'bg-gray-50  border-gray-200  text-gray-700',
     amber: 'bg-amber-50 border-amber-200 text-amber-700',
     green: 'bg-green-50 border-green-200 text-green-700',
   }
+  // 3px colored left border — a clean accent without added weight
+  const leftBorder = {
+    blue:  'border-l-[3px] border-l-tps-orange',
+    gray:  'border-l-[3px] border-l-gray-400',
+    amber: 'border-l-[3px] border-l-amber-500',
+    green: 'border-l-[3px] border-l-green-500',
+  }
   return (
-    <div className={`card border ${colors[color]} flex flex-col gap-1`}>
+    <div className={`card border ${colors[color]} ${leftBorder[color]} flex flex-col gap-1 rounded-l-none`}>
       <p className="text-xs text-gray-500">{label}</p>
       <p className="text-2xl font-bold">{value}</p>
     </div>
