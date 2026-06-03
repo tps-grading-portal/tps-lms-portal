@@ -12,15 +12,13 @@ export default async function ChairPage() {
   const token = await validatePinToken('PANEL_CHAIR')
   if (!token) redirect('/chair/auth')
 
-  // Second-line defence: clear stale JWT if the class is no longer active
+  // Second-line defence: redirect to auth if the class is no longer active.
+  // Cannot call clearPinToken here (Server Component — cookies are read-only).
   const classCheck = await db.class.findUnique({
     where: { id: token.classId },
     select: { isActive: true, name: true },
   })
-  if (!classCheck?.isActive) {
-    await clearPinToken('PANEL_CHAIR')
-    redirect('/chair/auth')
-  }
+  if (!classCheck?.isActive) redirect('/chair/auth')
 
   const cls = classCheck
 

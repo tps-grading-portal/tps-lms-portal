@@ -26,15 +26,15 @@ export default async function GraderPage({ searchParams }: PageProps) {
   const token = await validatePinToken('GRADER')
   if (!token) redirect('/grade/auth')
 
-  // Second-line defence: clear stale JWT if the class is no longer active
+  // Second-line defence: redirect to auth if the class is no longer active.
+  // Cannot call clearPinToken here (Server Component — cookies are read-only).
+  // The auth page detects the stale JWT and shows the class selector instead
+  // of auto-redirecting; re-authenticating overwrites the old JWT.
   const classCheck = await db.class.findUnique({
     where: { id: token.classId },
     select: { isActive: true },
   })
-  if (!classCheck?.isActive) {
-    await clearPinToken('GRADER')
-    redirect('/grade/auth')
-  }
+  if (!classCheck?.isActive) redirect('/grade/auth')
 
   const params = await searchParams
 
