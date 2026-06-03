@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: '/admin/classes/new', label: 'New Class'  },
   { href: '/admin/rubric',      label: 'Rubric'     },
   { href: '/admin/stats',       label: 'Statistics' },
+  { href: '/admin/surveys',     label: 'Surveys'    },
   { href: '/admin/import',      label: 'Import'     },
   { href: '/admin/settings',    label: 'Settings'   },
 ]
