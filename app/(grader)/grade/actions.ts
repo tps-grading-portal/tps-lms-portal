@@ -72,18 +72,20 @@ export async function submitGradesAction(
   if (!scenario) return { error: 'Scenario not found.' }
 
   // ── Retake detection ──────────────────────────────────────────────────────────
-  // A retake is any new submission for a student who already has a FINALIZED
-  // session in this class — regardless of scenario. Retakes always use a
-  // DIFFERENT scenario than the original attempt, so scenarioId is NOT filtered.
-  const priorFinalizedSession = await db.gradingSession.findFirst({
+  // A retake is triggered when any prior session for this student in this class
+  // resulted in a fail (hasFail=true), on a DIFFERENT scenario.
+  // We check hasFail rather than status='FINALIZED' because the Panel Chair may
+  // not have clicked Finalize yet — the fail session could still be READY_TO_FINALIZE.
+  const priorFailSession = await db.gradingSession.findFirst({
     where: {
-      classId:   token.classId,
+      classId:    token.classId,
       studentId,
-      // scenarioId intentionally omitted — retakes use a different scenario
-      status:    'FINALIZED',
+      scenarioId: { not: scenarioId }, // retakes always use a different scenario
+      hasFail:    true,
     },
-    orderBy: { finalizedAt: 'desc' },
+    orderBy: { createdAt: 'desc' },
   })
+  const isRetakeSubmission = !!priorFailSession
 
   // Find or create the active (non-finalized) session
   let session = await db.gradingSession.findFirst({
@@ -98,14 +100,28 @@ export async function submitGradesAction(
   if (!session) {
     session = await db.gradingSession.create({
       data: {
-        classId:       token.classId,
+        classId:        token.classId,
         studentId,
         scenarioId,
-        status:        'OPEN',
-        isRetake:      !!priorFinalizedSession,
-        retakeSourceId: priorFinalizedSession?.id ?? null,
+        status:         'OPEN',
+        isRetake:       isRetakeSubmission,
+        retakeSourceId: priorFailSession?.id ?? null,
       },
     })
+  }
+
+  // If the session already existed but wasn't flagged as a retake (because
+  // the fail wasn't detectable yet at the time the first grader submitted),
+  // update it now so processSession caps the outputScore correctly.
+  if (session && isRetakeSubmission && !session.isRetake) {
+    await db.gradingSession.update({
+      where: { id: session.id },
+      data: {
+        isRetake:       true,
+        retakeSourceId: priorFailSession?.id ?? null,
+      },
+    })
+    session = { ...session, isRetake: true }
   }
 
   // Find or create grader's assessment
