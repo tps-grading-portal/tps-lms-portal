@@ -58,9 +58,7 @@ export function AdminFormDetail({ form, submitUrl, resultsUrl }: Props) {
             {form.scoringEnabled && <><span>·</span><span>Scoring enabled</span></>}
           </div>
         </div>
-        <div className="flex gap-2">
-          <a href={resultsUrl} target="_blank" className="btn-primary text-sm">View Results ↗</a>
-        </div>
+        <div />
       </div>
 
       {form.invite && (

@@ -38,6 +38,16 @@ export default async function SandboxFormDetailPage({ params }: PageProps) {
         <span className="text-gray-900 font-medium">{form.title}</span>
       </div>
 
+      {/* Builder link — always accessible to admin */}
+      <div className="flex gap-3">
+        <Link href={`/admin/sandbox/${formId}/builder`} className="btn-primary text-sm">
+          ✎ Build / Edit Questions
+        </Link>
+        <a href={resultsUrl} target="_blank" className="btn-secondary text-sm">
+          View Results ↗
+        </a>
+      </div>
+
       <AdminFormDetail
         form={form}
         submitUrl={submitUrl}

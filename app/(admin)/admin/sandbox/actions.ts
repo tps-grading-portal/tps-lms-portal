@@ -119,7 +119,7 @@ export async function resetSandboxPinAction(
 
 export async function adminCreateFormAction(
   title: string,
-): Promise<{ formId?: string; error?: string }> {
+): Promise<{ formId?: string; pin?: string; error?: string }> {
   const session = await auth()
   if (!session) return { error: 'Unauthorized' }
 
@@ -139,5 +139,6 @@ export async function adminCreateFormAction(
   })
 
   revalidatePath('/admin/sandbox')
-  return { formId: form.id }
+  // Return the plain-text PIN so the UI can display it once
+  return { formId: form.id, pin: defaultPin }
 }
