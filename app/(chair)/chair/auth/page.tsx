@@ -3,13 +3,23 @@ import { validatePinToken } from '@/lib/pin-auth'
 import { redirect } from 'next/navigation'
 import { PinForm } from '@/components/ui/pin-form'
 import { chairAuthAction } from './actions'
+import { TPSBrandHeader } from '@/components/ui/tps-branding'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Panel Chair Access' }
 
 export default async function ChairAuthPage() {
   const token = await validatePinToken('PANEL_CHAIR')
-  if (token) redirect('/chair')
+
+  // Only skip auth if the JWT's class is still active — prevents stale class routing
+  if (token) {
+    const cls = await db.class.findUnique({
+      where: { id: token.classId },
+      select: { isActive: true },
+    })
+    if (cls?.isActive) redirect('/chair')
+    // Class is no longer active — fall through to show class selector
+  }
 
   const activeClasses = await db.class.findMany({
     where: { isActive: true },
@@ -20,16 +30,7 @@ export default async function ChairAuthPage() {
   return (
     <main className="min-h-screen flex items-center justify-center bg-tps-navy p-4">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-tps-gold mb-4">
-            <span className="text-tps-navy font-black text-xl">TPS</span>
-          </div>
-          <h1 className="text-white text-2xl font-bold">Panel Chair Access</h1>
-          <p className="text-tps-silver text-sm mt-1">
-            Enter the Panel Chair PIN to open the live dashboard
-          </p>
-        </div>
-
+        <TPSBrandHeader roleLabel="Panel Chair Access" />
         <div className="card">
           {activeClasses.length === 0 ? (
             <div className="text-center py-6 space-y-2">

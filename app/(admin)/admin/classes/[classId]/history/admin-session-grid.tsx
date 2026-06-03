@@ -11,11 +11,20 @@ import { cn, TRACK_LABELS } from '@/lib/utils'
 import { GRADE_LABELS } from '@/lib/constants'
 
 // ── Same 3-state cell coloring as Chair dashboard ─────────────────────────────
-function cellClass(gradeValue: number, isDiscontinuity: boolean, rowHasDisc: boolean): string {
-  if (rowHasDisc) {
-    return isDiscontinuity
-      ? 'bg-amber-300 text-amber-900 font-bold'
-      : 'bg-gray-100 text-gray-400'
+function cellClass(gradeValue: number, isDiscontinuity: boolean, rowHasDisc: boolean, sessionStatus: string): string {
+  if (sessionStatus === 'OPEN') {
+    if (gradeValue === 8)  return 'bg-red-100 text-red-700 font-bold'
+    if (gradeValue <= 2)   return 'bg-emerald-100 text-emerald-900'
+    if (gradeValue === 4)  return 'bg-gray-100 text-gray-700'
+    if (gradeValue <= 6)   return 'bg-amber-100 text-amber-800'
+    return 'bg-orange-200 text-orange-900'
+  }
+  if (sessionStatus === 'PENDING_RESOLUTION') {
+    if (rowHasDisc) {
+      return isDiscontinuity
+        ? 'bg-amber-300 text-amber-900 font-bold'
+        : 'bg-gray-100 text-gray-400'
+    }
   }
   return gradeValue === 8
     ? 'bg-red-100 text-red-700 font-bold'
@@ -312,7 +321,7 @@ export function AdminSessionGrid({ initialData, classId }: Props) {
                             <td key={assessmentId}
                               className={cn(
                                 'px-1 py-1 text-center border border-gray-100 transition-colors',
-                                cellClass(grade.gradeValue, isDisc, rowHasDisc),
+                                cellClass(grade.gradeValue, isDisc, rowHasDisc, session.status),
                               )}>
                               <button
                                 type="button"

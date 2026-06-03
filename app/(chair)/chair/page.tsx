@@ -12,10 +12,17 @@ export default async function ChairPage() {
   const token = await validatePinToken('PANEL_CHAIR')
   if (!token) redirect('/chair/auth')
 
-  const cls = await db.class.findUnique({
+  // Second-line defence: clear stale JWT if the class is no longer active
+  const classCheck = await db.class.findUnique({
     where: { id: token.classId },
-    select: { name: true },
+    select: { isActive: true, name: true },
   })
+  if (!classCheck?.isActive) {
+    await clearPinToken('PANEL_CHAIR')
+    redirect('/chair/auth')
+  }
+
+  const cls = classCheck
 
   const initialData = await getSessionDisplayData(token.classId)
 
@@ -23,12 +30,18 @@ export default async function ChairPage() {
     <main className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-tps-navy text-white px-4 h-14 flex items-center justify-between sticky top-0 z-20">
-        <div>
-          <span className="font-bold text-sm">Panel Chair — Class {cls?.name ?? '…'}</span>
-          <span className="ml-3 text-xs text-tps-silver">
-            {initialData.sessions.length} active session
-            {initialData.sessions.length !== 1 ? 's' : ''}
-          </span>
+        <div className="flex items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/grad-patch.png" alt="TPS" width={28} height={28} className="object-contain" />
+          <div>
+            <p className="text-tps-gold font-bold text-[9px] tracking-widest uppercase leading-none">Panel Chair</p>
+            <p className="text-white font-semibold text-sm leading-none mt-0.5">
+              Class {cls?.name ?? '…'}
+              <span className="text-tps-silver font-normal text-xs ml-2">
+                {initialData.sessions.length} session{initialData.sessions.length !== 1 ? 's' : ''}
+              </span>
+            </p>
+          </div>
         </div>
         <form
           action={async () => {

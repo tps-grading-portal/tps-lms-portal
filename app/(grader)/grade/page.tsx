@@ -26,6 +26,16 @@ export default async function GraderPage({ searchParams }: PageProps) {
   const token = await validatePinToken('GRADER')
   if (!token) redirect('/grade/auth')
 
+  // Second-line defence: clear stale JWT if the class is no longer active
+  const classCheck = await db.class.findUnique({
+    where: { id: token.classId },
+    select: { isActive: true },
+  })
+  if (!classCheck?.isActive) {
+    await clearPinToken('GRADER')
+    redirect('/grade/auth')
+  }
+
   const params = await searchParams
 
   const [cls, students, scenarios, staffMembers, criteria] = await Promise.all([
@@ -130,9 +140,14 @@ export default async function GraderPage({ searchParams }: PageProps) {
 function Header({ className }: { className?: string }) {
   return (
     <header className="bg-tps-navy text-white px-4 h-14 flex items-center justify-between sticky top-0 z-10">
-      <span className="font-bold text-sm">
-        Grading — Class {className ?? '…'}
-      </span>
+      <div className="flex items-center gap-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/grad-patch.png" alt="TPS" width={28} height={28} className="object-contain" />
+        <div>
+          <p className="text-tps-gold font-bold text-[9px] tracking-widest uppercase leading-none">Grader</p>
+          <p className="text-white font-semibold text-sm leading-none mt-0.5">Class {className ?? '…'}</p>
+        </div>
+      </div>
       <form
         action={async () => {
           'use server'

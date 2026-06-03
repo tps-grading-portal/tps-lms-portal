@@ -5,6 +5,7 @@ import { TRACK_LABELS } from '@/lib/utils'
 import { PASSING_SCORE } from '@/lib/constants'
 import { finalizeSessionAction } from '@/app/(chair)/chair/actions'
 import { PinManager } from '../pin-manager'
+import { StudentTrackEditor } from './student-track-editor'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Class Detail' }
@@ -186,14 +187,17 @@ export default async function ClassDetailPage({ params }: PageProps) {
       {/* Students */}
       <section>
         <h2 className="text-lg font-semibold text-gray-800 mb-3">
-          Students ({students.length})
+          Students ({students.length}) <span className="text-xs font-normal text-gray-400 ml-1">— click any card to edit track</span>
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {students.map((s) => (
-            <div key={s.id} className="card border border-gray-200 py-2 px-3 text-sm">
-              <p className="font-medium font-mono">{cls.name}-{s.number}</p>
-              <p className="text-xs text-gray-400">{TRACK_LABELS[s.track] ?? s.track}</p>
-            </div>
+            <StudentTrackEditor
+              key={s.id}
+              studentId={s.id}
+              number={s.number}
+              className={cls.name}
+              track={s.track}
+            />
           ))}
           {students.length === 0 && (
             <p className="text-sm text-gray-400 col-span-4">No students added.</p>

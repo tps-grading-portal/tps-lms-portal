@@ -27,15 +27,32 @@ export function ClassCreationWizard({ criteria, scenarios, surveyQuestions: init
 
   // All form field values tracked in state — avoids DOM-hidden-input submission failures
   const [fields, setFields] = useState({
-    name:         '',
-    studentCount: '',
-    graderPin:    '',
-    chairPin:     '',
-    makeActive:   true,
+    name:      '',
+    graderPin: '',
+    chairPin:  '',
+    makeActive: true,
   })
+
+  const [trackCounts, setTrackCounts] = useState({
+    PILOT: 0, RPA: 0, FTE: 0, OPERATOR: 0, CSO_WSO: 0, ABM: 0,
+  })
+
+  const TRACK_LABELS_DISPLAY: Record<string, string> = {
+    PILOT:    'Pilot',
+    RPA:      'RPA',
+    FTE:      'FTE',
+    OPERATOR: 'Operator (STC)',
+    CSO_WSO:  'CSO/WSO',
+    ABM:      'ABM',
+  }
+
+  const totalStudents = Object.values(trackCounts).reduce((a, b) => a + b, 0)
 
   const set = (key: keyof typeof fields, value: string | boolean) =>
     setFields((f) => ({ ...f, [key]: value }))
+
+  const setTrack = (track: string, value: number) =>
+    setTrackCounts((t) => ({ ...t, [track]: Math.max(0, value) }))
 
   const totalWeight  = criteria.reduce((s, c) => s + c.weight, 0)
   const weightsOk    = Math.abs(totalWeight - 1) < 0.001
@@ -44,11 +61,14 @@ export function ClassCreationWizard({ criteria, scenarios, surveyQuestions: init
     if (submitting) return
     setSubmitting(true)
     const fd = new FormData()
-    fd.set('name',         fields.name)
-    fd.set('studentCount', fields.studentCount)
-    fd.set('graderPin',    fields.graderPin)
-    fd.set('chairPin',     fields.chairPin)
+    fd.set('name',      fields.name)
+    fd.set('graderPin', fields.graderPin)
+    fd.set('chairPin',  fields.chairPin)
     if (fields.makeActive) fd.set('makeActive', 'on')
+    // Pass per-track counts
+    Object.entries(trackCounts).forEach(([track, count]) => {
+      fd.set(`track_${track}`, String(count))
+    })
     const res = await createClassWizardAction(null, fd)
     setResult(res)
     setSubmitting(false)
@@ -179,23 +199,52 @@ export function ClassCreationWizard({ criteria, scenarios, surveyQuestions: init
       </div>
 
       {/* ── Step 0: Basic Info ──────────────────────────────────────────────── */}
-      <div className={step === 0 ? 'card space-y-4' : 'hidden'}>
+      <div className={step === 0 ? 'card space-y-5' : 'hidden'}>
         <h2 className="font-semibold text-lg text-gray-800">Basic Information</h2>
+
         <div>
           <label className="field-label">Class Name <span className="text-gray-400 font-normal">(e.g. 26A, 26B)</span></label>
           <input value={fields.name} onChange={(e) => set('name', e.target.value.toUpperCase())}
-            maxLength={20} placeholder="26A" className="field-input uppercase" />
+            maxLength={20} placeholder="26A" className="field-input w-40 uppercase" />
         </div>
+
+        {/* Per-track student count breakdown */}
         <div>
-          <label className="field-label">Number of Students</label>
-          <input type="number" value={fields.studentCount} onChange={(e) => set('studentCount', e.target.value)}
-            min={1} max={500} placeholder="40" className="field-input w-40" />
-          <p className="text-xs text-gray-400 mt-1">Generates sequential student numbers (e.g. 26A-1 through 26A-40).</p>
+          <label className="field-label">Students by Track</label>
+          <p className="text-xs text-gray-400 mb-3">
+            Numbers 1–{totalStudents || 'N'} will be randomly assigned across tracks.
+            The CSV you download will show which track each number belongs to.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {Object.keys(trackCounts).map((track) => (
+              <div key={track}>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">
+                  {TRACK_LABELS_DISPLAY[track]}
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={200}
+                  value={trackCounts[track as keyof typeof trackCounts] || ''}
+                  onChange={(e) => setTrack(track, parseInt(e.target.value, 10) || 0)}
+                  placeholder="0"
+                  className="field-input text-center font-mono"
+                />
+              </div>
+            ))}
+          </div>
+          <div className={cn(
+            'mt-3 px-3 py-2 rounded-lg text-sm font-medium',
+            totalStudents > 0 ? 'bg-blue-50 text-tps-navy border border-blue-200' : 'bg-gray-50 text-gray-400'
+          )}>
+            Total: <strong>{totalStudents}</strong> student{totalStudents !== 1 ? 's' : ''}
+          </div>
         </div>
+
         <div className="flex items-center gap-2">
           <input id="makeActive" type="checkbox" checked={fields.makeActive}
             onChange={(e) => set('makeActive', e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-tps-blue" />
+            className="h-4 w-4 rounded border-gray-300 text-tps-orange" />
           <label htmlFor="makeActive" className="text-sm text-gray-700">
             Set as active class (deactivates current active class)
           </label>
@@ -360,7 +409,7 @@ export function ClassCreationWizard({ criteria, scenarios, surveyQuestions: init
         <h2 className="font-semibold text-lg text-gray-800">Confirm &amp; Create</h2>
         <div className="space-y-3 text-sm">
           <SummaryRow label="Class Name"     value={fields.name || '(not set)'} warn={!fields.name} />
-          <SummaryRow label="Students"       value={fields.studentCount ? `${fields.studentCount} numbers will be generated` : '(not set)'} warn={!fields.studentCount} />
+          <SummaryRow label="Students"       value={totalStudents > 0 ? `${totalStudents} total — randomly assigned across ${Object.values(trackCounts).filter(Boolean).length} track(s)` : '(not set — add students in Step 1)'} warn={totalStudents === 0} />
           <SummaryRow label="Criteria"       value={`${criteria.length} criteria — ${(totalWeight * 100).toFixed(1)}% total — will be frozen`} warn={!weightsOk} />
           <SummaryRow label="Grader PIN"     value={fields.graderPin ? '●●●●●● (set)' : '(not set)'} warn={!fields.graderPin} />
           <SummaryRow label="Chair PIN"      value={fields.chairPin  ? '●●●●●● (set)' : '(not set)'} warn={!fields.chairPin}  />
@@ -394,7 +443,7 @@ export function ClassCreationWizard({ criteria, scenarios, surveyQuestions: init
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting || !fields.name || !fields.studentCount || !fields.graderPin || !fields.chairPin || !weightsOk}
+            disabled={submitting || !fields.name || totalStudents === 0 || !fields.graderPin || !fields.chairPin || !weightsOk}
             className="btn-primary text-sm px-6"
           >
             {submitting ? 'Creating class…' : 'Create Class'}

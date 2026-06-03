@@ -1,6 +1,7 @@
 import { auth } from '@/lib/auth'
 import Link from 'next/link'
 import { signOut } from '@/lib/auth'
+import { TPSPatchBadge } from '@/components/ui/tps-branding'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: { template: '%s | Admin', default: 'Admin' } }
@@ -16,8 +17,6 @@ const NAV_ITEMS = [
 ]
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  // Route protection is handled entirely by middleware.ts — no redirect here.
-  // Duplicating it in the layout caused an infinite loop on /admin/login.
   await auth()
 
   return (
@@ -25,7 +24,17 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       {/* Top bar */}
       <header className="bg-tps-navy text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
-          <span className="font-bold text-sm tracking-wide">TPS Grading Portal</span>
+          <div className="flex items-center gap-3">
+            <TPSPatchBadge size={32} />
+            <div>
+              <p className="text-tps-gold font-bold text-[10px] tracking-widest uppercase leading-none">
+                USAF Test Pilot School
+              </p>
+              <p className="text-white font-semibold text-sm leading-none mt-0.5">
+                Grading Portal
+              </p>
+            </div>
+          </div>
           <form
             action={async () => {
               'use server'
@@ -48,7 +57,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                 key={item.href}
                 href={item.href}
                 className="px-4 py-3 text-sm font-medium text-gray-600 hover:text-tps-navy hover:bg-gray-50
-                           border-b-2 border-transparent hover:border-tps-blue transition-colors whitespace-nowrap"
+                           border-b-2 border-transparent hover:border-tps-orange transition-colors whitespace-nowrap"
               >
                 {item.label}
               </Link>
