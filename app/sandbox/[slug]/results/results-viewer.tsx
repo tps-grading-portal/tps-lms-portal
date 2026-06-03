@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useMemo, useTransition } from 'react'
-import { aggregateBySubject, generateLLMPrompt, assignRankStatus } from '@/lib/sandbox-scoring'
+import { aggregateBySubject, generateLLMPrompt, assignRankStatus, aggregateRepeatingSection, parseRepeatEntries } from '@/lib/sandbox-scoring'
 import { editSandboxSubmissionAction, deleteSandboxSubmissionAction } from './actions'
 import { cn } from '@/lib/utils'
 
@@ -215,51 +215,106 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
 
       {/* Tab: Subjects (Grader mode) */}
       {activeTab === 'subjects' && form.mode === 'GRADER' && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <label className="text-sm text-gray-600">Highlight top</label>
-            <input type="number" value={topN} onChange={(e) => setTopN(parseInt(e.target.value) || 5)}
-              min={1} max={aggregates.length} className="field-input w-16 text-center" />
-            <span className="text-sm text-gray-600">subjects</span>
-          </div>
-          <div className="overflow-x-auto rounded-xl border border-gray-200">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Rank</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Subject</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Responses</th>
-                  {form.scoringEnabled && <>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Avg Score</th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Min</th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Max</th>
-                  </>}
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {aggregates.map((agg, i) => {
-                  const status = rankStatuses[i]
-                  const rowBg  = status === 'top' ? 'bg-green-50' : status === 'low' ? 'bg-red-50' : 'bg-amber-50'
-                  const badge  = status === 'top' ? '★ TOP' : status === 'low' ? '✗ LOW' : '◐ MID'
-                  const badgeCls = status === 'top' ? 'bg-green-100 text-green-800' : status === 'low' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
-                  return (
-                    <tr key={agg.subject} className={rowBg}>
-                      <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                      <td className="px-3 py-2 font-medium">{agg.subject}</td>
-                      <td className="px-3 py-2 text-gray-500">{agg.count}</td>
+        <div className="space-y-6">
+          {/* Group-level table */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-gray-600">Highlight top</label>
+              <input type="number" value={topN} onChange={(e) => setTopN(parseInt(e.target.value) || 5)}
+                min={1} max={aggregates.length} className="field-input w-16 text-center" />
+              <span className="text-sm text-gray-600">groups</span>
+            </div>
+            {aggregates.length > 0 && (
+              <div className="overflow-x-auto rounded-xl border border-gray-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Rank</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Group / Subject</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Evaluations</th>
                       {form.scoringEnabled && <>
-                        <td className="px-3 py-2 font-bold font-mono">{agg.avgScore?.toFixed(2) ?? '—'}</td>
-                        <td className="px-3 py-2 text-gray-500 font-mono">{agg.minScore?.toFixed(1) ?? '—'}</td>
-                        <td className="px-3 py-2 text-gray-500 font-mono">{agg.maxScore?.toFixed(1) ?? '—'}</td>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Avg Score</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Min</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Max</th>
                       </>}
-                      <td className="px-3 py-2"><span className={cn('text-xs px-2 py-0.5 rounded-full font-semibold', badgeCls)}>{badge}</span></td>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Status</th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {aggregates.map((agg, i) => {
+                      const status = rankStatuses[i]
+                      const rowBg  = status === 'top' ? 'bg-green-50' : status === 'low' ? 'bg-red-50' : 'bg-amber-50'
+                      const badge  = status === 'top' ? '★ TOP' : status === 'low' ? '✗ LOW' : '◐ MID'
+                      const badgeCls = status === 'top' ? 'bg-green-100 text-green-800' : status === 'low' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                      return (
+                        <tr key={agg.subject} className={rowBg}>
+                          <td className="px-3 py-2 text-gray-500">{i + 1}</td>
+                          <td className="px-3 py-2 font-medium">{agg.subject}</td>
+                          <td className="px-3 py-2 text-gray-500">{agg.count}</td>
+                          {form.scoringEnabled && <>
+                            <td className="px-3 py-2 font-bold font-mono">{agg.avgScore?.toFixed(2) ?? '—'}</td>
+                            <td className="px-3 py-2 text-gray-500 font-mono">{agg.minScore?.toFixed(1) ?? '—'}</td>
+                            <td className="px-3 py-2 text-gray-500 font-mono">{agg.maxScore?.toFixed(1) ?? '—'}</td>
+                          </>}
+                          <td className="px-3 py-2"><span className={cn('text-xs px-2 py-0.5 rounded-full font-semibold', badgeCls)}>{badge}</span></td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
+
+          {/* Individual scores from repeating sections */}
+          {(() => {
+            const repeatQ = questions.find((q) => q.questionType === 'REPEATING_SECTION')
+            if (!repeatQ || !form.scoringEnabled) return null
+            const personScoreMap = aggregateRepeatingSection(
+              submissions.map((s) => ({ subjectName: s.subjectName, answers: s.answers, graderName: s.graderName })),
+              questions.map((q) => ({ id: q.id, questionType: q.questionType, weight: q.weight, pointMap: (q.pointMap as Record<string,number>|null)??null, scaleMin: q.scaleMin, scaleMax: q.scaleMax, label: q.label, options: q.options })),
+            )
+            if (personScoreMap.size === 0) return null
+            return (
+              <div className="space-y-3">
+                <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                  🔄 Individual Scores
+                  <span className="text-xs font-normal text-gray-400">Group score averaged across all graders, individual score averaged per person</span>
+                </h3>
+                {Array.from(personScoreMap.entries()).map(([group, persons]) => (
+                  <div key={group} className="card border border-orange-200 bg-orange-50 space-y-3">
+                    <p className="font-semibold text-sm text-tps-navy">{group}</p>
+                    <div className="overflow-x-auto rounded-lg border border-orange-100">
+                      <table className="w-full text-sm">
+                        <thead className="bg-orange-100">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Person</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Group Score</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Individual Score</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 font-bold">Total</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Graders</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-orange-100 bg-white">
+                          {persons.map((p) => (
+                            <tr key={p.person}>
+                              <td className="px-3 py-2 font-medium">{p.person}</td>
+                              <td className="px-3 py-2 font-mono text-gray-600">{p.groupScore.toFixed(2)}</td>
+                              <td className="px-3 py-2 font-mono text-gray-600">{p.individualScore.toFixed(2)}</td>
+                              <td className={cn('px-3 py-2 font-bold font-mono', p.totalScore >= 70 ? 'text-green-700' : 'text-red-600')}>
+                                {p.totalScore.toFixed(2)}
+                              </td>
+                              <td className="px-3 py-2 text-gray-400 text-xs">{p.gradersCount}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
         </div>
       )}
 

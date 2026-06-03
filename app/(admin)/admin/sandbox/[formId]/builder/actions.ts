@@ -22,7 +22,7 @@ interface SavePayload {
     label:        string
     description:  string | null
     sectionLabel: string | null
-    options:      string[] | null
+    options:      string[] | Record<string, unknown> | null
     scaleMin:     number | null
     scaleMax:     number | null
     pointMap:     Record<string, number> | null
@@ -81,7 +81,7 @@ export async function adminSaveFormAction(payload: SavePayload): Promise<SaveRes
         label:        q.label,
         description:  q.description,
         sectionLabel: q.sectionLabel,
-        options:      q.options ?? undefined,
+        options:      q.options as never ?? undefined,
         scaleMin:     q.scaleMin,
         scaleMax:     q.scaleMax,
         pointMap:     q.pointMap ?? undefined,

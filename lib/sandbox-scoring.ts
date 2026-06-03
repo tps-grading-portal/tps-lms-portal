@@ -142,6 +142,143 @@ export function aggregateBySubject(
   return result.sort((a, b) => (b.avgScore ?? 0) - (a.avgScore ?? 0))
 }
 
+// ── Repeating Section types and scoring ──────────────────────────────────────
+
+export interface RepeatSubQuestion {
+  id:        string
+  label:     string
+  type:      string   // GRADE_1_8 | NUMERIC | etc.
+  subWeight: number   // weight within the section (0–1, must sum to 1)
+}
+
+export interface RepeatingSectionConfig {
+  subQuestions:  RepeatSubQuestion[]
+  subjectSource: 'freetext' | 'predefined'
+}
+
+export interface RepeatEntry {
+  subject: string
+  [sqId: string]: string  // sub-question answers
+}
+
+/** Parse a repeating section's answers from the submission JSON */
+export function parseRepeatEntries(raw: unknown): RepeatEntry[] {
+  if (!raw) return []
+  try {
+    if (typeof raw === 'string') return JSON.parse(raw) as RepeatEntry[]
+    if (Array.isArray(raw)) return raw as RepeatEntry[]
+  } catch { /* fall through */ }
+  return []
+}
+
+/**
+ * Compute group score (non-repeating questions only) for a single submission.
+ * Returns 0–100 representing the group component.
+ */
+export function scoreGroupComponent(
+  answers:   Record<string, unknown>,
+  questions: SandboxQuestion[],
+): number {
+  const groupQs = questions.filter((q) => q.questionType !== 'REPEATING_SECTION' && q.weight !== null && q.weight > 0)
+  let score = 0
+  for (const q of groupQs) {
+    const pts = getPoints(answers[q.id], q)
+    if (pts !== null) score += pts * (q.weight ?? 0)
+  }
+  return Math.round(score * 100) / 100
+}
+
+/**
+ * Compute per-person individual score for one entry in a repeating section.
+ * Returns the person's section contribution (already multiplied by sectionWeight).
+ */
+export function scoreIndividualEntry(
+  entry:         RepeatEntry,
+  config:        RepeatingSectionConfig,
+  sectionWeight: number,
+): number {
+  let sectionScore = 0
+  for (const sq of config.subQuestions) {
+    const raw = entry[sq.id]
+    if (!raw) continue
+    const pts = getPoints(raw, { id: sq.id, questionType: sq.type, weight: null, pointMap: null, scaleMin: null, scaleMax: null, label: sq.label })
+    if (pts !== null) sectionScore += pts * sq.subWeight
+  }
+  return Math.round(sectionScore * sectionWeight * 100) / 100
+}
+
+/**
+ * Aggregate group + individual scores across multiple grader submissions for the same group.
+ *
+ * Formula (matches sandbox-example1.js updateMasterSummary):
+ *   groupScore  = avg(groupComponent) across all submissions for this group
+ *   individualScore_p = avg(sectionScore_p) across submissions where person p was graded
+ *   totalScore_p = groupScore + individualScore_p
+ */
+export interface GroupPersonScore {
+  person:           string
+  groupScore:       number
+  individualScore:  number
+  totalScore:       number
+  gradersCount:     number
+}
+
+export function aggregateRepeatingSection(
+  submissions: {
+    subjectName:   string | null
+    answers:       Record<string, unknown>
+    graderName:    string | null
+  }[],
+  questions:    SandboxQuestion[],
+): Map<string, GroupPersonScore[]> {
+  // Map: groupName → Map<personName, { groupScores[], individualScores[] }>
+  const byGroup = new Map<string, Map<string, { groupScores: number[]; indivScores: number[] }>>()
+
+  const repeatQ = questions.find((q) => q.questionType === 'REPEATING_SECTION')
+  if (!repeatQ) return new Map()
+
+  const config = (repeatQ as SandboxQuestion & { options?: unknown }).options as RepeatingSectionConfig | null
+  if (!config) return new Map()
+
+  const sectionWeight = repeatQ.weight ?? 0
+
+  for (const sub of submissions) {
+    const group = sub.subjectName ?? '(ungrouped)'
+    if (!byGroup.has(group)) byGroup.set(group, new Map())
+    const personMap = byGroup.get(group)!
+
+    const groupScore = scoreGroupComponent(sub.answers, questions)
+    const entries    = parseRepeatEntries(sub.answers[repeatQ.id])
+
+    for (const entry of entries) {
+      const person = entry.subject?.trim()
+      if (!person) continue
+      if (!personMap.has(person)) personMap.set(person, { groupScores: [], indivScores: [] })
+      const pm = personMap.get(person)!
+      pm.groupScores.push(groupScore)
+      pm.indivScores.push(scoreIndividualEntry(entry, config, sectionWeight))
+    }
+  }
+
+  const result = new Map<string, GroupPersonScore[]>()
+  for (const [group, personMap] of byGroup) {
+    const personScores: GroupPersonScore[] = []
+    for (const [person, data] of personMap) {
+      const avgGroup  = data.groupScores.reduce((a, b) => a + b, 0) / data.groupScores.length
+      const avgIndiv  = data.indivScores.reduce((a, b) => a + b, 0) / data.indivScores.length
+      personScores.push({
+        person,
+        groupScore:      Math.round(avgGroup * 100) / 100,
+        individualScore: Math.round(avgIndiv * 100) / 100,
+        totalScore:      Math.round((avgGroup + avgIndiv) * 100) / 100,
+        gradersCount:    data.groupScores.length,
+      })
+    }
+    result.set(group, personScores.sort((a, b) => b.totalScore - a.totalScore))
+  }
+  return result
+}
+
 // ── Multi-dimension desirability score (Value/Risk style) ─────────────────────
 
 export function desirabilityScore(avgValue: number, avgRisk: number): number {

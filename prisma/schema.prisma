@@ -304,12 +304,13 @@ model InstructorSurveyResponse {
 // ============================================================
 
 enum SandboxQuestionType {
-  GRADE_1_8       // TPS 1-8 scale with WAA→Fail labels
-  NUMERIC         // custom min–max scale, admin-defined point map
-  MULTIPLE_CHOICE // single answer from a list
-  CHECKBOX        // multiple answers from a list
-  TEXT            // free-text response
-  NUMBER          // open numeric entry
+  GRADE_1_8         // TPS 1-8 scale with WAA→Fail labels
+  NUMERIC           // custom min–max scale, admin-defined point map
+  MULTIPLE_CHOICE   // single answer from a list
+  CHECKBOX          // multiple answers from a list
+  TEXT              // free-text response
+  NUMBER            // open numeric entry
+  REPEATING_SECTION // group + individual: answered once for the group, repeated per person
 }
 
 enum SandboxMode {

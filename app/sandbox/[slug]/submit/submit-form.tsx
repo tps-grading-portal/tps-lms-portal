@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react'
 import { submitSandboxAction } from './actions'
 import { cn } from '@/lib/utils'
 import { GRADE_LABELS } from '@/lib/constants'
+import type { RepeatEntry, RepeatingSectionConfig } from '@/lib/sandbox-scoring'
 
 const GRADE_BG: Record<number, string> = {
   1: 'bg-emerald-600 text-white', 2: 'bg-emerald-500 text-white',
@@ -226,6 +227,16 @@ export function SandboxSubmitForm({ form, questions, staffMembers, slug, initial
                   className="field-input w-40"
                 />
               )}
+
+              {/* REPEATING_SECTION — renders inline per-person grading */}
+              {q.questionType === 'REPEATING_SECTION' && (
+                <RepeatingSectionInput
+                  q={q}
+                  predefinedSubjects={predefined}
+                  answers={answers}
+                  setAnswer={setAnswer}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -244,5 +255,137 @@ export function SandboxSubmitForm({ form, questions, staffMembers, slug, initial
         </button>
       </div>
     </form>
+  )
+}
+
+// ── Repeating Section Input ────────────────────────────────────────────────────
+
+function RepeatingSectionInput({
+  q, predefinedSubjects, answers, setAnswer,
+}: {
+  q: Question
+  predefinedSubjects: string[]
+  answers: Record<string, string | string[]>
+  setAnswer: (qId: string, val: string) => void
+}) {
+  const config = q.options as unknown as RepeatingSectionConfig | null
+  const subQs  = config?.subQuestions ?? []
+
+  // Parse current entries from answers state
+  let entries: RepeatEntry[] = []
+  try {
+    const raw = answers[q.id]
+    if (raw && typeof raw === 'string') entries = JSON.parse(raw)
+  } catch { /* start fresh */ }
+
+  const setEntries = (next: RepeatEntry[]) => setAnswer(q.id, JSON.stringify(next))
+
+  const addEntry = (subject = '') => setEntries([...entries, { subject }])
+  const removeEntry = (i: number) => setEntries(entries.filter((_, idx) => idx !== i))
+  const updateEntry = (i: number, field: string, val: string) =>
+    setEntries(entries.map((e, idx) => idx === i ? { ...e, [field]: val } : e))
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 text-xs text-tps-orange font-medium">
+        Grade each person individually below
+      </div>
+
+      {/* Pre-defined subject list: render all at once */}
+      {config?.subjectSource === 'predefined' && predefinedSubjects.length > 0 ? (
+        predefinedSubjects.map((subject, si) => {
+          const entry = entries.find((e) => e.subject === subject) ?? { subject }
+          const entryIdx = entries.findIndex((e) => e.subject === subject)
+          const handleEntry = (field: string, val: string) => {
+            if (entryIdx >= 0) updateEntry(entryIdx, field, val)
+            else setEntries([...entries, { subject, [field]: val }])
+          }
+          return (
+            <div key={si} className="card border border-orange-100 space-y-3">
+              <p className="font-semibold text-sm text-tps-navy">{subject}</p>
+              {subQs.map((sq) => (
+                <GradeSubQuestion key={sq.id} sq={sq} value={entry[sq.id] ?? ''}
+                  onChange={(v) => handleEntry(sq.id, v)} />
+              ))}
+            </div>
+          )
+        })
+      ) : (
+        /* Free-text: grader adds people */
+        <>
+          {entries.map((entry, ei) => (
+            <div key={ei} className="card border border-orange-100 space-y-3">
+              <div className="flex gap-2 items-center">
+                <input
+                  value={entry.subject}
+                  onChange={(e) => updateEntry(ei, 'subject', e.target.value)}
+                  placeholder="Person's name"
+                  className="field-input flex-1 text-sm font-medium"
+                />
+                <button onClick={() => removeEntry(ei)} className="text-red-400 hover:text-red-600 min-h-[44px] px-2">×</button>
+              </div>
+              {subQs.map((sq) => (
+                <GradeSubQuestion key={sq.id} sq={sq} value={entry[sq.id] ?? ''}
+                  onChange={(v) => updateEntry(ei, sq.id, v)} />
+              ))}
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => addEntry()}
+            className="w-full border-2 border-dashed border-orange-200 rounded-xl py-3 text-sm text-orange-400 hover:border-tps-orange hover:text-tps-orange transition-colors"
+          >
+            + Add person to grade
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function GradeSubQuestion({
+  sq, value, onChange,
+}: {
+  sq: { id: string; label: string; type: string }
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div>
+      <label className="field-label text-xs">{sq.label}</label>
+      {sq.type === 'GRADE_1_8' && (
+        <div className="grid grid-cols-8 gap-1">
+          {[1,2,3,4,5,6,7,8].map((v) => {
+            const selected = value === String(v)
+            const colors: Record<number, string> = {
+              1:'bg-emerald-600 text-white', 2:'bg-emerald-500 text-white',
+              3:'bg-green-400 text-gray-900', 4:'bg-gray-200 text-gray-800',
+              5:'bg-amber-200 text-gray-800', 6:'bg-orange-300 text-gray-900',
+              7:'bg-orange-400 text-white',   8:'bg-red-500 text-white',
+            }
+            return (
+              <button key={v} type="button" onClick={() => onChange(String(v))}
+                className={cn(
+                  'rounded border min-h-[44px] text-sm font-bold transition-all active:scale-95',
+                  selected ? colors[v] + ' ring-2 ring-offset-1 ring-tps-orange' : 'border-gray-200 text-gray-600 hover:bg-gray-100'
+                )}>
+                {v}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {sq.type === 'TEXT' && (
+        <textarea rows={2} value={value} onChange={(e) => onChange(e.target.value)}
+          className="field-input resize-y text-sm" placeholder="Response…" />
+      )}
+      {(sq.type === 'NUMERIC' || sq.type === 'NUMBER') && (
+        <input type="number" value={value} onChange={(e) => onChange(e.target.value)}
+          className="field-input w-24" />
+      )}
+      {sq.type === 'MULTIPLE_CHOICE' && (
+        <input value={value} onChange={(e) => onChange(e.target.value)} className="field-input text-sm" placeholder="Enter response" />
+      )}
+    </div>
   )
 }
