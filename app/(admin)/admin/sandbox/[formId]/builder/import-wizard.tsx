@@ -74,8 +74,7 @@ export function ImportWizard({ onImport, onClose, creatorToken }: Props) {
         const buffer = await file.arrayBuffer()
         const pdfjsLib = await import('pdfjs-dist')
         // Use CDN worker matching the installed version
-        pdfjsLib.GlobalWorkerOptions.workerSrc =
-          `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
         const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
         let pdfText = ''
         for (let p = 1; p <= pdf.numPages; p++) {
