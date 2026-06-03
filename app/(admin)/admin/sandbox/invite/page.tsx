@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createCreatorInviteAction } from '../actions'
 
 export default function SendInvitePage() {
-  const [result,    setResult]    = useState<{ linkToken?: string; pin?: string; error?: string } | null>(null)
+  const [result,    setResult]    = useState<{ linkToken?: string; pin?: string; emailSent?: boolean; recipientEmail?: string; error?: string } | null>(null)
   const [sending,   setSending]   = useState(false)
   const [copied,    setCopied]    = useState<'link' | 'pin' | null>(null)
 
@@ -16,7 +16,9 @@ export default function SendInvitePage() {
     setSending(true)
     const fd = new FormData(e.currentTarget)
     const res = await createCreatorInviteAction(fd)
-    setResult('success' in res && res.success ? { linkToken: res.linkToken, pin: res.pin } : { error: 'error' in res ? res.error : 'Unknown error' })
+    setResult('success' in res && res.success
+      ? { linkToken: res.linkToken, pin: res.pin, emailSent: res.emailSent, recipientEmail: res.recipientEmail }
+      : { error: 'error' in res ? res.error : 'Unknown error' })
     setSending(false)
   }
 
@@ -59,12 +61,15 @@ export default function SendInvitePage() {
               </div>
             </div>
           </div>
-          <p className="text-sm text-green-700">
-            Email the URL and PIN to the recipient. They use the URL to access the form builder and the PIN to authenticate.
-          </p>
-          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-            Note: Automated email is not yet configured. Please share the URL and PIN manually.
-          </p>
+          {result.emailSent ? (
+            <p className="text-sm text-green-700 bg-green-100 border border-green-300 rounded p-2">
+              ✓ Invite email sent to <strong>{result.recipientEmail}</strong>. The URL and PIN above are shown for your records.
+            </p>
+          ) : (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+              ⚠ Email could not be sent automatically. Please share the URL and PIN with the recipient manually.
+            </p>
+          )}
         </div>
 
         <Link href="/admin/sandbox" className="btn-secondary text-sm inline-flex">← Back to Sandbox</Link>
