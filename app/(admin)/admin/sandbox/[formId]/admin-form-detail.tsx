@@ -46,6 +46,86 @@ export function AdminFormDetail({ form, submitUrl, resultsUrl, allForms, granted
 
   const copy = (text: string) => navigator.clipboard.writeText(text)
 
+  const printDistributionSheet = async () => {
+    // Fetch QR SVGs as data URLs so they embed correctly in the print window
+    const toDataUrl = async (url: string) => {
+      const res  = await fetch(`/api/qr?url=${encodeURIComponent(url)}`)
+      const blob = await res.blob()
+      return new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.readAsDataURL(blob)
+      })
+    }
+    const [submitQr, resultsQr] = await Promise.all([toDataUrl(submitUrl), toDataUrl(resultsUrl)])
+
+    const win = window.open('', '_blank', 'width=750,height=1000')
+    if (!win) return
+    win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>TPS Sandbox — ${form.title}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; color: #1B2A4A; background: #fff; padding: 48px; }
+    .header { border-bottom: 3px solid #F26522; padding-bottom: 16px; margin-bottom: 32px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .header-sub { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6B7280; }
+    .header-org { font-size: 18px; font-weight: 700; color: #1B2A4A; margin-top: 4px; }
+    .header-date { font-size: 11px; color: #6B7280; text-align: right; }
+    h1 { font-size: 22px; margin-bottom: 24px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+    .card { border: 2px solid #F26522; border-radius: 8px; padding: 20px; text-align: center; }
+    .card-label { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #F26522; margin-bottom: 12px; }
+    .card img { width: 180px; height: 180px; display: block; margin: 0 auto 16px; }
+    .card-url { font-size: 10px; color: #374151; word-break: break-all; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 4px; padding: 8px; text-align: left; }
+    .pin-row { border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px 20px; margin-bottom: 24px; display: flex; align-items: center; gap: 24px; }
+    .pin-label { font-size: 11px; color: #6B7280; text-transform: uppercase; letter-spacing: 1px; flex-shrink: 0; }
+    .pin-note { font-size: 11px; color: #9CA3AF; }
+    .footer { font-size: 10px; color: #9CA3AF; border-top: 1px solid #E5E7EB; padding-top: 16px; margin-top: 8px; }
+    @media print { body { padding: 32px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="header-sub">USAF Test Pilot School — Test Foundations</div>
+      <div class="header-org">The Sandbox — Form Distribution Sheet</div>
+    </div>
+    <div class="header-date">${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+  </div>
+
+  <h1>${form.title}</h1>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-label">📋 Submit a Response</div>
+      <img src="${submitQr}" alt="Submit QR"/>
+      <div class="card-url">${submitUrl}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">📊 View Results</div>
+      <img src="${resultsQr}" alt="Results QR"/>
+      <div class="card-url">${resultsUrl}</div>
+    </div>
+  </div>
+
+  <div class="pin-row">
+    <div>
+      <div class="pin-label">Access PINs</div>
+      <div class="pin-note" style="margin-top:4px">Each link above is protected by a separate PIN set by the administrator. Contact your administrator for the PIN.</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    TPS Test Foundations · USAF Test Pilot School · ${form.title} · Generated ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+  </div>
+  <script>window.onload = function() { window.print() }<\/script>
+</body>
+</html>`)
+    win.document.close()
+  }
+
   const weightedQs  = form.questions.filter((q) => q.weight !== null && q.weight > 0)
   const totalWeight = weightedQs.reduce((s, q) => s + (q.weight ?? 0), 0)
 
@@ -63,7 +143,9 @@ export function AdminFormDetail({ form, submitUrl, resultsUrl, allForms, granted
             {form.scoringEnabled && <><span>·</span><span>Scoring enabled</span></>}
           </div>
         </div>
-        <div />
+        <button onClick={printDistributionSheet} className="btn-secondary text-sm flex-shrink-0">
+          ↓ Print Distribution Sheet
+        </button>
       </div>
 
       {form.invite && (
