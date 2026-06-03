@@ -6,11 +6,13 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = { title: { template: '%s | Admin', default: 'Admin' } }
 
 const NAV_ITEMS = [
-  { href: '/admin',          label: 'Dashboard' },
-  { href: '/admin/classes',  label: 'Classes'   },
-  { href: '/admin/rubric',   label: 'Rubric'    },
-  { href: '/admin/stats',    label: 'Statistics' },
-  { href: '/admin/settings', label: 'Settings'  },
+  { href: '/admin',             label: 'Dashboard'  },
+  { href: '/admin/classes',     label: 'Classes'    },
+  { href: '/admin/classes/new', label: 'New Class'  },
+  { href: '/admin/rubric',      label: 'Rubric'     },
+  { href: '/admin/stats',       label: 'Statistics' },
+  { href: '/admin/import',      label: 'Import'     },
+  { href: '/admin/settings',    label: 'Settings'   },
 ]
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {

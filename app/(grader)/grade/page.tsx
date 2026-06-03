@@ -12,6 +12,7 @@ interface PageProps {
   searchParams: Promise<{
     submitted?:      string
     sessionId?:      string
+    isRetake?:       string
     studentId?:      string
     scenarioId?:     string
     staffMemberId?:  string
@@ -28,11 +29,12 @@ export default async function GraderPage({ searchParams }: PageProps) {
     db.class.findUnique({ where: { id: token.classId }, select: { name: true } }),
     db.student.findMany({
       where: { classId: token.classId },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true, track: true },
+      orderBy: { number: 'asc' },
+      select: { id: true, number: true, track: true },
     }),
+    // Scenarios are now global — show all active ones
     db.scenario.findMany({
-      where: { classId: token.classId, isActive: true },
+      where: { isActive: true },
       orderBy: { number: 'asc' },
       select: { id: true, number: true, label: true },
     }),
@@ -41,9 +43,8 @@ export default async function GraderPage({ searchParams }: PageProps) {
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
     }),
-    db.criterion.findMany({
-      orderBy: { sortOrder: 'asc' },
-    }),
+    // Use class-specific criteria snapshot if it exists
+    import('@/lib/criteria-utils').then((m) => m.getCriteriaForClass(token.classId)),
   ])
 
   // Load existing grades if returning to update
@@ -75,24 +76,22 @@ export default async function GraderPage({ searchParams }: PageProps) {
     return (
       <main className="min-h-screen bg-gray-50 overflow-hidden">
         <Header className={cls?.name} />
-        <SuccessScreen className={cls?.name} />
+        <SuccessScreen className={cls?.name} isRetake={params.isRetake === '1'} />
       </main>
     )
   }
 
-  // No students or scenarios in class — show setup message
-  if (students.length === 0 || scenarios.length === 0) {
+  // No students added yet
+  if (students.length === 0) {
     return (
       <main className="min-h-screen bg-gray-50">
         <Header className={cls?.name} />
         <div className="max-w-lg mx-auto px-4 py-12 text-center space-y-4">
           <p className="text-lg font-semibold text-gray-700">
-            {students.length === 0
-              ? 'No students have been added to this class yet.'
-              : 'No scenarios have been configured for this class yet.'}
+            No students have been added to this class yet.
           </p>
           <p className="text-sm text-gray-500">
-            Contact your administrator to set up the student roster and scenario list.
+            Contact your administrator to set up the student roster.
           </p>
         </div>
       </main>
@@ -109,6 +108,7 @@ export default async function GraderPage({ searchParams }: PageProps) {
           scenarios={scenarios}
           staffMembers={staffMembers}
           existingGrades={existingGrades}
+          className={cls?.name}
           preSelectedStudentId={params.studentId}
           preSelectedScenarioId={params.scenarioId}
           preSelectedStaffMemberId={params.staffMemberId}

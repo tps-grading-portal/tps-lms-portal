@@ -16,7 +16,7 @@ type Criterion = {
   sortOrder: number
 }
 
-type Student   = { id: string; name: string; track: string }
+type Student   = { id: string; number: number; track: string }
 type Scenario  = { id: string; number: number; label: string }
 type Staff     = { id: string; name: string }
 type ExistingGrades = Record<string, number> // criterionId → gradeValue
@@ -27,6 +27,7 @@ interface GradeFormProps {
   scenarios:      Scenario[]
   staffMembers:   Staff[]
   existingGrades: ExistingGrades
+  className?:               string
   preSelectedStudentId?:    string
   preSelectedScenarioId?:   string
   preSelectedStaffMemberId?: string
@@ -63,6 +64,7 @@ export function GradeForm({
   scenarios,
   staffMembers,
   existingGrades,
+  className,
   preSelectedStudentId,
   preSelectedScenarioId,
   preSelectedStaffMemberId,
@@ -94,7 +96,7 @@ export function GradeForm({
             <option value="">Select student…</option>
             {students.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name}
+                Student {s.number}
               </option>
             ))}
           </select>

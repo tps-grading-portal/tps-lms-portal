@@ -193,7 +193,7 @@ export function SessionGrid({ initialData, classId }: SessionGridProps) {
             )}>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-tps-navy">{session.student.name}</span>
+                  <span className="font-bold text-tps-navy">Student {session.student.number}</span>
                   <span className="text-xs text-gray-500">
                     {TRACK_LABELS[session.student.track] ?? session.student.track}
                   </span>

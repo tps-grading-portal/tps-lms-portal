@@ -89,7 +89,7 @@ export async function GET(
       )
 
       const row: Record<string, string | number | boolean> = {
-        student:     sess.student.name,
+        student:     `${cls.name}-${sess.student.number}`,
         track:       TRACK_LABELS[sess.student.track] ?? sess.student.track,
         scenario:    sess.scenario.label,
         grader:      assessment.staffMember.name,
@@ -153,7 +153,7 @@ export async function GET(
 
   for (const sess of sessions) {
     const row = summarySheet.addRow({
-      student:    sess.student.name,
+      student:    `${cls.name}-${sess.student.number}`,
       track:      TRACK_LABELS[sess.student.track] ?? sess.student.track,
       scenario:   sess.scenario.label,
       graders:    sess.assessments.length,

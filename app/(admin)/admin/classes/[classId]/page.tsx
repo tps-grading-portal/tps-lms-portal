@@ -15,35 +15,34 @@ interface PageProps {
 export default async function ClassDetailPage({ params }: PageProps) {
   const { classId } = await params
 
-  const cls = await db.class.findUnique({
-    where: { id: classId },
-    include: {
-      students: { orderBy: { name: 'asc' } },
-      scenarios: { orderBy: { number: 'asc' } },
-      sessions: {
-        orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
-        include: {
-          student:  { select: { name: true, track: true } },
-          scenario: { select: { number: true, label: true } },
-          assessments: {
-            include: {
-              staffMember: { select: { name: true } },
-              grades:      { select: { gradeValue: true, isDiscontinuity: true, criterion: { select: { code: true } } } },
-            },
+  const [cls, sessions, students, studentSurveys] = await Promise.all([
+    db.class.findUnique({ where: { id: classId }, select: { id: true, name: true, isActive: true, archivedAt: true, createdAt: true } }),
+    db.gradingSession.findMany({
+      where: { classId },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      include: {
+        student:  { select: { number: true, track: true } },
+        scenario: { select: { number: true, label: true } },
+        assessments: {
+          include: {
+            staffMember: { select: { name: true } },
+            grades: { select: { gradeValue: true, isDiscontinuity: true } },
           },
         },
       },
-      studentSurveys: {
-        orderBy: { submittedAt: 'desc' },
-        take: 10,
-        select: { id: true, submittedAt: true, responses: true },
-      },
-    },
-  })
+    }),
+    db.student.findMany({ where: { classId }, orderBy: { number: 'asc' } }),
+    db.studentSurveyResponse.findMany({
+      where: { classId },
+      orderBy: { submittedAt: 'desc' },
+      take: 10,
+      select: { id: true, submittedAt: true, responses: true },
+    }),
+  ])
 
   if (!cls) notFound()
 
-  const finalized = cls.sessions.filter((s) => s.status === 'FINALIZED')
+  const finalized = sessions.filter((s) => s.status === 'FINALIZED')
   const scores    = finalized.map((s) => s.finalScore ?? 0).filter(Boolean)
   const passCount = scores.filter((s) => s >= PASSING_SCORE).length
   const passRate  = scores.length ? Math.round((passCount / scores.length) * 100) : null
@@ -71,7 +70,10 @@ export default async function ClassDetailPage({ params }: PageProps) {
             Created {new Date(cls.createdAt).toLocaleDateString()}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <Link href={`/admin/classes/${classId}/snapshot`} className="btn-secondary">
+            Grade Snapshot
+          </Link>
           <Link href={`/admin/classes/${classId}/history`} className="btn-secondary">
             Grade History
           </Link>
@@ -84,8 +86,8 @@ export default async function ClassDetailPage({ params }: PageProps) {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
-          { label: 'Students',  value: cls.students.length },
-          { label: 'Sessions',  value: cls.sessions.length },
+          { label: 'Students',  value: students.length },
+          { label: 'Sessions',  value: sessions.length },
           { label: 'Finalized', value: finalized.length },
           { label: 'Avg Score', value: avgScore ?? '—' },
           { label: 'Pass Rate', value: passRate !== null ? `${passRate}%` : '—' },
@@ -100,7 +102,7 @@ export default async function ClassDetailPage({ params }: PageProps) {
       {/* Sessions table */}
       <section>
         <h2 className="text-lg font-semibold text-gray-800 mb-3">
-          Sessions ({cls.sessions.length})
+          Sessions ({sessions.length})
         </h2>
         <div className="overflow-x-auto rounded-xl border border-gray-200">
           <table className="w-full text-sm">
@@ -112,7 +114,7 @@ export default async function ClassDetailPage({ params }: PageProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {cls.sessions
+              {sessions
                 .slice()
                 .sort((a, b) => (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9))
                 .map((session) => {
@@ -121,7 +123,7 @@ export default async function ClassDetailPage({ params }: PageProps) {
 
                   return (
                     <tr key={session.id} className={hasDisc ? 'bg-amber-50' : 'bg-white hover:bg-gray-50'}>
-                      <td className="px-4 py-3 font-medium">{session.student.name}</td>
+                      <td className="px-4 py-3 font-mono font-medium">{cls.name}-{session.student.number}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs">
                         {TRACK_LABELS[session.student.track] ?? session.student.track}
                       </td>
@@ -153,7 +155,7 @@ export default async function ClassDetailPage({ params }: PageProps) {
                     </tr>
                   )
                 })}
-              {cls.sessions.length === 0 && (
+              {sessions.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-sm">
                     No sessions yet — grades will appear here as graders submit.
@@ -168,26 +170,26 @@ export default async function ClassDetailPage({ params }: PageProps) {
       {/* Students */}
       <section>
         <h2 className="text-lg font-semibold text-gray-800 mb-3">
-          Students ({cls.students.length})
+          Students ({students.length})
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {cls.students.map((s) => (
+          {students.map((s) => (
             <div key={s.id} className="card border border-gray-200 py-2 px-3 text-sm">
-              <p className="font-medium truncate">{s.name}</p>
+              <p className="font-medium font-mono">{cls.name}-{s.number}</p>
               <p className="text-xs text-gray-400">{TRACK_LABELS[s.track] ?? s.track}</p>
             </div>
           ))}
-          {cls.students.length === 0 && (
+          {students.length === 0 && (
             <p className="text-sm text-gray-400 col-span-4">No students added.</p>
           )}
         </div>
       </section>
 
       {/* Recent surveys */}
-      {cls.studentSurveys.length > 0 && (
+      {studentSurveys.length > 0 && (
         <section>
           <h2 className="text-lg font-semibold text-gray-800 mb-3">
-            Recent Student Surveys ({cls.studentSurveys.length} shown)
+            Recent Student Surveys ({studentSurveys.length} shown)
           </h2>
           <div className="overflow-x-auto rounded-xl border border-gray-200">
             <table className="w-full text-sm">
@@ -198,7 +200,7 @@ export default async function ClassDetailPage({ params }: PageProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {cls.studentSurveys.map((survey) => {
+                {studentSurveys.map((survey) => {
                   const r = survey.responses as Record<string, string>
                   return (
                     <tr key={survey.id} className="bg-white hover:bg-gray-50">

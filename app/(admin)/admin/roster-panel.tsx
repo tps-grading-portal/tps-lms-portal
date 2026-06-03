@@ -11,7 +11,7 @@ import {
 } from './roster-actions'
 import { TRACK_LABELS } from '@/lib/utils'
 
-type Student  = { id: string; name: string; track: string }
+type Student  = { id: string; number: number; track: string }
 type Scenario = { id: string; number: number; label: string }
 type Staff    = { id: string; name: string; isActive: boolean }
 
@@ -19,15 +19,13 @@ interface RosterPanelProps {
   classId:      string
   className:    string
   students:     Student[]
-  scenarios:    Scenario[]
   staffMembers: Staff[]
 }
 
-export function RosterPanel({ classId, className, students, scenarios, staffMembers }: RosterPanelProps) {
+export function RosterPanel({ classId, className, students, staffMembers }: RosterPanelProps) {
   return (
-    <div className="grid gap-6 md:grid-cols-3">
+    <div className="grid gap-6 md:grid-cols-2">
       <StudentManager classId={classId} className={className} students={students} />
-      <ScenarioManager classId={classId} className={className} scenarios={scenarios} />
       <StaffManager staffMembers={staffMembers} />
     </div>
   )
@@ -46,7 +44,7 @@ function StudentManager({ classId, className, students }: { classId: string; cla
 
       <form action={formAction} className="space-y-2">
         <input type="hidden" name="classId" value={classId} />
-        <input name="name" required placeholder="Student name" className="field-input text-sm" />
+        <input name="number" type="number" min="1" required placeholder="Student number (e.g. 5)" className="field-input text-sm" />
         <select name="track" required className="field-select text-sm">
           <option value="">Select track…</option>
           {Object.entries(TRACK_LABELS).map(([val, label]) => (
@@ -63,7 +61,7 @@ function StudentManager({ classId, className, students }: { classId: string; cla
         {students.map((s) => (
           <li key={s.id} className="flex items-center justify-between gap-2 text-sm py-1 border-b border-gray-100 last:border-0">
             <span className="truncate">
-              <span className="font-medium">{s.name}</span>{' '}
+              <span className="font-medium font-mono">#{s.number}</span>{' '}
               <span className="text-gray-400 text-xs">{TRACK_LABELS[s.track] ?? s.track}</span>
             </span>
             <form action={async () => { await removeStudentAction(s.id) }}>
@@ -93,8 +91,7 @@ function ScenarioManager({ classId, className, scenarios }: { classId: string; c
       </h3>
 
       <form action={formAction} className="space-y-2">
-        <input type="hidden" name="classId" value={classId} />
-        <input name="number" type="number" min="1" required placeholder="Number (e.g. 4)" className="field-input text-sm" />
+        <input name="number" type="number" min="1" required placeholder="Number (e.g. 12)" className="field-input text-sm" />
         <input name="label" required placeholder="Label (e.g. Scenario 4)" className="field-input text-sm" />
         {result?.error && <p className="text-xs text-red-600">{result.error}</p>}
         <button type="submit" disabled={pending} className="btn-secondary w-full text-sm">

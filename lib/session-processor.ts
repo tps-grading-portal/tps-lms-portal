@@ -6,27 +6,28 @@
  */
 import { db } from '@/lib/db'
 import { computeWeightedSum, detectSessionDiscontinuities } from '@/lib/grade-calc'
-import { MIN_GRADERS, AUTO_FAIL_SCORE } from '@/lib/constants'
+import { MIN_GRADERS, AUTO_FAIL_SCORE, PASSING_SCORE } from '@/lib/constants'
+import { getCriteriaForClass } from '@/lib/criteria-utils'
 
 export async function processSession(sessionId: string): Promise<void> {
   // Single query — load session + all assessments + all grades + criterion weights
-  const [session, allCriteria] = await Promise.all([
-    db.gradingSession.findUnique({
-      where: { id: sessionId },
-      include: {
-        assessments: {
-          include: {
-            grades: {
-              include: { criterion: { select: { id: true, weight: true } } },
-            },
+  const session = await db.gradingSession.findUnique({
+    where: { id: sessionId },
+    include: {
+      assessments: {
+        include: {
+          grades: {
+            include: { criterion: { select: { id: true, weight: true } } },
           },
         },
       },
-    }),
-    db.criterion.findMany({ select: { id: true } }),
-  ])
+    },
+  })
 
   if (!session) throw new Error(`Session ${sessionId} not found`)
+
+  // Use class-specific criteria if available, otherwise fall back to global template
+  const allCriteria = await getCriteriaForClass(session.classId)
 
   const totalCriteria = allCriteria.length
 
@@ -113,12 +114,19 @@ export async function processSession(sessionId: string): Promise<void> {
 
   const sums = updatedAssessments.map((a) => a.weightedSum ?? 0)
   const avgScore = sums.reduce((a, b) => a + b, 0) / sums.length
+  const finalScore = Math.round(avgScore * 100) / 100
+
+  // Retake rule: if this is a retake and the student passes,
+  // the official output score is capped at exactly 70.0
+  const outputScore =
+    session.isRetake && finalScore >= PASSING_SCORE ? PASSING_SCORE : finalScore
 
   await db.gradingSession.update({
     where: { id: sessionId },
     data: {
       status: 'READY_TO_FINALIZE',
-      finalScore: Math.round(avgScore * 100) / 100,
+      finalScore,
+      outputScore,
       hasFail: false,
     },
   })
@@ -137,7 +145,7 @@ export async function getSessionDisplayData(classId: string) {
       },
       orderBy: { createdAt: 'desc' },
       include: {
-        student: { select: { name: true, track: true } },
+        student: { select: { number: true, track: true } },
         scenario: { select: { number: true, label: true } },
         assessments: {
           include: {
@@ -158,10 +166,9 @@ export async function getSessionDisplayData(classId: string) {
         },
       },
     }),
-    db.criterion.findMany({
-      select: { id: true, code: true, name: true, sortOrder: true },
-      orderBy: { sortOrder: 'asc' },
-    }),
+    getCriteriaForClass(classId).then((criteria) =>
+      criteria.map((c) => ({ id: c.id, code: c.code, name: c.name, sortOrder: c.sortOrder }))
+    ),
   ])
 
   return { sessions, criteria }

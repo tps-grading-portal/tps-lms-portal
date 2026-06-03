@@ -5,9 +5,9 @@ import { auth } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
-// ── Add Student ───────────────────────────────────────────────────────────────
-
 export type RosterResult = { error?: string; success?: boolean }
+
+// ── Add Student (manual, by number) ──────────────────────────────────────────
 
 export async function addStudentAction(
   _prev: RosterResult | null,
@@ -16,21 +16,24 @@ export async function addStudentAction(
   const session = await auth()
   if (!session) return { error: 'Unauthorized' }
 
-  const classId = formData.get('classId')?.toString()
-  const name    = formData.get('name')?.toString()?.trim()
-  const track   = formData.get('track')?.toString()
+  const classId  = formData.get('classId')?.toString()
+  const numberStr = formData.get('number')?.toString()
+  const track    = formData.get('track')?.toString()
 
-  if (!classId || !name || !track) return { error: 'All fields required.' }
+  if (!classId || !numberStr || !track) return { error: 'All fields required.' }
+
+  const number = parseInt(numberStr, 10)
+  if (isNaN(number) || number < 1) return { error: 'Student number must be a positive integer.' }
 
   const valid = z.enum(['PILOT','RPA','FTE','OPERATOR','CSO_WSO','ABM']).safeParse(track)
   if (!valid.success) return { error: 'Invalid track.' }
 
   try {
-    await db.student.create({ data: { classId, name, track: valid.data } })
+    await db.student.create({ data: { classId, number, track: valid.data } })
     revalidatePath('/admin')
     return { success: true }
   } catch {
-    return { error: 'Student already exists in this class.' }
+    return { error: 'Student number already exists in this class.' }
   }
 }
 
@@ -41,7 +44,20 @@ export async function removeStudentAction(studentId: string): Promise<void> {
   revalidatePath('/admin')
 }
 
-// ── Add Scenario ──────────────────────────────────────────────────────────────
+// ── Student track update ──────────────────────────────────────────────────────
+
+export async function updateStudentTrackAction(
+  studentId: string,
+  track: string,
+): Promise<void> {
+  const session = await auth()
+  if (!session) throw new Error('Unauthorized')
+  const valid = z.enum(['PILOT','RPA','FTE','OPERATOR','CSO_WSO','ABM']).parse(track)
+  await db.student.update({ where: { id: studentId }, data: { track: valid } })
+  revalidatePath('/admin')
+}
+
+// ── Scenarios are now global — managed in /admin/settings ────────────────────
 
 export async function addScenarioAction(
   _prev: RosterResult | null,
@@ -50,28 +66,27 @@ export async function addScenarioAction(
   const session = await auth()
   if (!session) return { error: 'Unauthorized' }
 
-  const classId     = formData.get('classId')?.toString()
-  const numberStr   = formData.get('number')?.toString()
-  const label       = formData.get('label')?.toString()?.trim()
+  const numberStr = formData.get('number')?.toString()
+  const label     = formData.get('label')?.toString()?.trim()
 
-  if (!classId || !numberStr || !label) return { error: 'All fields required.' }
+  if (!numberStr || !label) return { error: 'All fields required.' }
 
   const number = parseInt(numberStr, 10)
   if (isNaN(number) || number < 1) return { error: 'Scenario number must be a positive integer.' }
 
   try {
-    await db.scenario.create({ data: { classId, number, label } })
+    await db.scenario.create({ data: { number, label } })
     revalidatePath('/admin')
     return { success: true }
   } catch {
-    return { error: 'Scenario number already exists for this class.' }
+    return { error: 'Scenario number already exists globally.' }
   }
 }
 
 export async function removeScenarioAction(scenarioId: string): Promise<void> {
   const session = await auth()
   if (!session) throw new Error('Unauthorized')
-  await db.scenario.delete({ where: { id: scenarioId } })
+  await db.scenario.update({ where: { id: scenarioId }, data: { isActive: false } })
   revalidatePath('/admin')
 }
 

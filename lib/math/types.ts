@@ -131,7 +131,7 @@ export function toSessionStats(raw: {
   status: string
   finalScore: number | null
   hasFail: boolean
-  student: { name: string; track: string }
+  student: { number: number; track: string }
   scenario: { label: string }
   class: { id: string; name: string }
   assessments: {
@@ -149,7 +149,7 @@ export function toSessionStats(raw: {
   return {
     sessionId:   raw.id,
     studentId:   raw.studentId,
-    studentName: raw.student.name,
+    studentName: String(raw.student.number),
     track:       raw.student.track,
     scenario:    raw.scenario.label,
     classId:     raw.class.id,

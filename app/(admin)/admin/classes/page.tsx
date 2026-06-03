@@ -21,7 +21,7 @@ export default async function ClassesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-tps-navy">Classes</h1>
-        <Link href="/admin" className="btn-secondary text-sm">
+        <Link href="/admin/classes/new" className="btn-primary text-sm">
           + Create New Class
         </Link>
       </div>

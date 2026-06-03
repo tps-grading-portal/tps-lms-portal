@@ -566,14 +566,17 @@ const INSTRUCTOR_SURVEY_QUESTIONS = [
 async function main() {
   console.log('🌱 Starting database seed...')
 
-  // 1. Criteria
+  // 1. Criteria (global template — classId null)
   console.log('  → Seeding rubric criteria...')
   for (const criterion of CRITERIA) {
-    await prisma.criterion.upsert({
-      where: { code: criterion.code },
-      update: criterion,
-      create: criterion,
+    const existing = await prisma.criterion.findFirst({
+      where: { code: criterion.code, classId: null },
     })
+    if (existing) {
+      await prisma.criterion.update({ where: { id: existing.id }, data: criterion })
+    } else {
+      await prisma.criterion.create({ data: { ...criterion, classId: null, isActive: true } })
+    }
   }
   console.log(`     ✓ ${CRITERIA.length} criteria seeded`)
 
@@ -641,6 +644,42 @@ async function main() {
     }
   }
   console.log(`     ✓ ${INSTRUCTOR_SURVEY_QUESTIONS.length} instructor survey questions seeded`)
+
+  // 5. Global scenarios 1–11 (permanent, never reused)
+  console.log('  → Seeding global scenarios 1–11...')
+  for (let n = 1; n <= 11; n++) {
+    await prisma.scenario.upsert({
+      where:  { number: n },
+      update: {},
+      create: { number: n, label: `Scenario ${n}` },
+    })
+  }
+  console.log('     ✓ 11 scenarios seeded')
+
+  // 6. Staff members (all graders from Class 25B gradesheet)
+  console.log('  → Seeding staff members...')
+  const STAFF = [
+    'Siddiqui (P)', 'Vanhoy (FTE)', 'Freeborn (P)', 'Buckwalter (P)', 'Karlen (P)',
+    'Aronoff, R (FTE)', 'Cookson (FTE)', 'Erb (FTE)', 'Gray (P)', 'Ross (STC)',
+    'Sands (STC)', 'Coward (STC)', 'Downing (P)', 'Gilliland (P)', 'Hayes (P)',
+    'Kern (P)', 'Major (P)', 'Pinedo (P)', 'Shick (P)', 'Strafaccia (P)',
+    'Wright (P)', 'Baxley (FTE)', 'Brooks (FTE)', 'Echegaray (FTE)', 'Lee (FTE)',
+    'Reis (FTE)', 'Vorgert, S (FTE)', 'Webb (FTE)', 'Wenner (FTE)', 'Stephens (FTE)',
+    'Ames (P)', 'Borek (P)', 'Boswell (P)', 'Duede (P)', 'Forystek (P)',
+    'Gahan (CSO/WSO)', 'Gotwald (P)', 'Hamidani (FTE)', 'Heary (P)', 'Hickernell (P)',
+    'McCafferty (FTE)', 'Miller, E (FTE)', 'Patel (P)', 'Prudhomme (P)', 'Sanders (FTE)',
+    'Steigerwald (P)', 'Tegtmeier (FTE)', 'Vantiger (P)', 'Ho (STC)', 'Coleman (P)',
+    'Heinz (FTE)', 'Smith, K (P)', 'Vorgert, C (FTE)', 'Lovell (P)', 'Payne (P)',
+    'Sick (P)', 'Ruchlin (STC)', 'Salerno (STC)', 'Lowry (STC)', 'Montes (P)',
+    'Post (STC)', 'Peterson, J (FTE)', 'Hutcheson (P)', 'Ricci (FTE)', 'Peterson, W (FTE)',
+    'Agbeyibor (FTE)', 'Fitle (P)', 'Suhr (P)', 'Sisneroz (FTE)', 'Dawson (FTE)',
+    'Flynn (P)', 'Bellingham (FTE)', 'Elledge (FTE)',
+  ]
+  const staffResult = await prisma.staffMember.createMany({
+    data: STAFF.map((name) => ({ name, isActive: true })),
+    skipDuplicates: true,
+  })
+  console.log(`     ✓ ${staffResult.count} staff members seeded (${STAFF.length} total, duplicates skipped)`)
 
   console.log('\n✅ Database seed complete.')
   console.log('\nDefault credentials:')

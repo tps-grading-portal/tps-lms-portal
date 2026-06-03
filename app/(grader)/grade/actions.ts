@@ -3,6 +3,7 @@
 import { db } from '@/lib/db'
 import { validatePinToken } from '@/lib/pin-auth'
 import { processSession } from '@/lib/session-processor'
+import { getCriteriaForClass } from '@/lib/criteria-utils'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
@@ -11,10 +12,10 @@ import { z } from 'zod'
 const gradeValueSchema = z.number().int().min(1).max(8)
 
 const submitGradesSchema = z.object({
-  studentId:    z.string().cuid(),
-  scenarioId:   z.string().cuid(),
+  studentId:     z.string().cuid(),
+  scenarioId:    z.string().cuid(),
   staffMemberId: z.string().cuid(),
-  grades: z.record(z.string(), gradeValueSchema), // criterionId → gradeValue
+  grades: z.record(z.string(), gradeValueSchema),
 })
 
 export type SubmitGradesResult = { error: string } | { success: true; sessionId: string }
@@ -26,7 +27,7 @@ export async function submitGradesAction(
   const token = await validatePinToken('GRADER')
   if (!token) return { error: 'Session expired. Please re-authenticate.' }
 
-  // Parse grades from formData — each criterion field is named `grade_<criterionId>`
+  // Parse grades
   const rawGrades: Record<string, number> = {}
   for (const [key, value] of formData.entries()) {
     if (key.startsWith('grade_')) {
@@ -44,32 +45,40 @@ export async function submitGradesAction(
   }
 
   const parsed = submitGradesSchema.safeParse(raw)
-  if (!parsed.success) {
-    return { error: 'Invalid form data: ' + parsed.error.issues[0]?.message }
-  }
+  if (!parsed.success) return { error: 'Invalid form data: ' + parsed.error.issues[0]?.message }
 
   const { studentId, scenarioId, staffMemberId, grades } = parsed.data
 
-  // Validate all 7 criteria have been graded
-  const allCriteria = await db.criterion.findMany({ select: { id: true } })
-  const missingCriteria = allCriteria.filter((c) => grades[c.id] === undefined)
-  if (missingCriteria.length > 0) {
-    return { error: `Please grade all ${allCriteria.length} criteria before submitting.` }
+  // Validate all class criteria have been graded
+  const classCriteria = await getCriteriaForClass(token.classId)
+  const missing = classCriteria.filter((c) => grades[c.id] === undefined)
+  if (missing.length > 0) {
+    return { error: `Please grade all ${classCriteria.length} criteria before submitting.` }
   }
 
-  // Verify this student + scenario belong to the grader's class
-  const [student, scenario] = await Promise.all([
-    db.student.findFirst({
-      where: { id: studentId, classId: token.classId },
-    }),
-    db.scenario.findFirst({
-      where: { id: scenarioId, classId: token.classId },
-    }),
-  ])
+  // Verify student belongs to this class
+  const student = await db.student.findFirst({
+    where: { id: studentId, classId: token.classId },
+  })
   if (!student) return { error: 'Student not found in your class.' }
-  if (!scenario) return { error: 'Scenario not found in your class.' }
 
-  // Find or create the grading session for this student + scenario
+  // Scenarios are now global — just verify it exists
+  const scenario = await db.scenario.findUnique({ where: { id: scenarioId } })
+  if (!scenario) return { error: 'Scenario not found.' }
+
+  // ── Retake detection ──────────────────────────────────────────────────────────
+  // If a FINALIZED session exists for this student + scenario, this is a retake.
+  const priorFinalizedSession = await db.gradingSession.findFirst({
+    where: {
+      classId:   token.classId,
+      studentId,
+      scenarioId,
+      status:    'FINALIZED',
+    },
+    orderBy: { finalizedAt: 'desc' },
+  })
+
+  // Find or create the active (non-finalized) session
   let session = await db.gradingSession.findFirst({
     where: {
       classId: token.classId,
@@ -82,22 +91,19 @@ export async function submitGradesAction(
   if (!session) {
     session = await db.gradingSession.create({
       data: {
-        classId: token.classId,
+        classId:       token.classId,
         studentId,
         scenarioId,
-        status: 'OPEN',
+        status:        'OPEN',
+        isRetake:      !!priorFinalizedSession,
+        retakeSourceId: priorFinalizedSession?.id ?? null,
       },
     })
   }
 
-  // Find or create the grader's assessment for this session
+  // Find or create grader's assessment
   let assessment = await db.graderAssessment.findUnique({
-    where: {
-      sessionId_staffMemberId: {
-        sessionId: session.id,
-        staffMemberId,
-      },
-    },
+    where: { sessionId_staffMemberId: { sessionId: session.id, staffMemberId } },
     include: { grades: true },
   })
 
@@ -118,62 +124,22 @@ export async function submitGradesAction(
           data: {
             gradeValue,
             originalValue: existing.originalValue ?? existing.gradeValue,
-            editedBy: 'GRADER',
-            editedAt: new Date(),
-          },
-        })
-      } else {
-        return db.criterionGrade.create({
-          data: {
-            assessmentId: assessment!.id,
-            criterionId,
-            gradeValue,
+            editedBy:  'GRADER',
+            editedAt:  new Date(),
           },
         })
       }
+      return db.criterionGrade.create({
+        data: { assessmentId: assessment!.id, criterionId, gradeValue },
+      })
     }),
   )
 
-  // Mark assessment as submitted
   await db.graderAssessment.update({
     where: { id: assessment.id },
     data: { submittedAt: new Date() },
   })
 
-  // Run session processing (discontinuity detection + weighted sums)
   await processSession(session.id)
-
-  redirect(`/grade?submitted=1&sessionId=${session.id}`)
-}
-
-// ── Add student (quick-add from grader form) ──────────────────────────────────
-
-const addStudentSchema = z.object({
-  name:  z.string().min(1).max(100).transform((s) => s.trim()),
-  track: z.enum(['PILOT', 'RPA', 'FTE', 'OPERATOR', 'CSO_WSO', 'ABM']),
-})
-
-export async function addStudentAction(
-  _prev: { error?: string; studentId?: string } | null,
-  formData: FormData,
-): Promise<{ error?: string; studentId?: string }> {
-  const token = await validatePinToken('GRADER')
-  if (!token) return { error: 'Session expired.' }
-
-  const parsed = addStudentSchema.safeParse({
-    name:  formData.get('name'),
-    track: formData.get('track'),
-  })
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message }
-
-  const existing = await db.student.findFirst({
-    where: { classId: token.classId, name: parsed.data.name },
-  })
-  if (existing) return { studentId: existing.id }
-
-  const student = await db.student.create({
-    data: { classId: token.classId, ...parsed.data },
-  })
-
-  return { studentId: student.id }
+  redirect(`/grade?submitted=1&sessionId=${session.id}&isRetake=${session.isRetake ? '1' : '0'}`)
 }

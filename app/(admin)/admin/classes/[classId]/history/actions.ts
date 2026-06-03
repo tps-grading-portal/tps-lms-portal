@@ -18,7 +18,7 @@ export async function getAdminSessionData(classId: string) {
         { createdAt: 'desc' },
       ],
       include: {
-        student:  { select: { name: true, track: true } },
+        student:  { select: { number: true, track: true } },
         scenario: { select: { number: true, label: true } },
         assessments: {
           orderBy: { createdAt: 'asc' },

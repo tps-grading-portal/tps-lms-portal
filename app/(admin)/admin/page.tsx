@@ -14,8 +14,7 @@ export default async function AdminPage() {
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
       include: {
         _count: { select: { students: true, sessions: true } },
-        students: { orderBy: { name: 'asc' }, select: { id: true, name: true, track: true } },
-        scenarios: { orderBy: { number: 'asc' }, select: { id: true, number: true, label: true } },
+        students: { orderBy: { number: 'asc' }, select: { id: true, number: true, track: true } },
       },
     }),
     db.staffMember.findMany({ orderBy: { name: 'asc' } }),
@@ -50,7 +49,7 @@ export default async function AdminPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Active Class"           value={activeClass?.name ?? '—'}        color="blue"   />
-        <StatCard label="Open / In-Progress"     value={activeClass?._count.sessions ?? 0} color="gray"  />
+        <StatCard label="Open / In-Progress"     value={activeClass?._count?.sessions ?? 0} color="gray"  />
         <StatCard label="Pending Discontinuities" value={pendingSessions}                   color="amber"  />
         <StatCard label="Total Finalized"         value={totalFinalized}                   color="green"  />
       </div>
@@ -113,7 +112,6 @@ export default async function AdminPage() {
             classId={activeClass.id}
             className={activeClass.name}
             students={activeClass.students}
-            scenarios={activeClass.scenarios}
             staffMembers={staffMembers}
           />
         </section>
