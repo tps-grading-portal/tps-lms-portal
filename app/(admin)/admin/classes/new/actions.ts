@@ -127,9 +127,9 @@ export async function getStudentCsvAction(classId: string): Promise<string> {
     select:  { number: true, track: true },
   })
 
-  const header = 'Student Number,Class,Track,Real Name (assign offline)\n'
+  const header = 'Student Number,Class,Track,Last Name,Callsign\n'
   const rows   = students
-    .map((s) => `${cls.name}-${s.number},${cls.name},${TRACK_DISPLAY[s.track] ?? s.track},`)
+    .map((s) => `${cls.name}-${s.number},${cls.name},${TRACK_DISPLAY[s.track] ?? s.track},,`)
     .join('\n')
 
   return header + rows
