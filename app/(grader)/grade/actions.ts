@@ -49,6 +49,11 @@ export async function submitGradesAction(
 
   const { studentId, scenarioId, staffMemberId, grades } = parsed.data
 
+  // Original submission identifiers — only present when using "Edit My Submission"
+  const originalStudentId     = formData.get('originalStudentId')?.toString()
+  const originalScenarioId    = formData.get('originalScenarioId')?.toString()
+  const originalStaffMemberId = formData.get('originalStaffMemberId')?.toString()
+
   // Validate all class criteria have been graded
   const classCriteria = await getCriteriaForClass(token.classId)
   const missing = classCriteria.filter((c) => grades[c.id] === undefined)
@@ -67,12 +72,14 @@ export async function submitGradesAction(
   if (!scenario) return { error: 'Scenario not found.' }
 
   // ── Retake detection ──────────────────────────────────────────────────────────
-  // If a FINALIZED session exists for this student + scenario, this is a retake.
+  // A retake is any new submission for a student who already has a FINALIZED
+  // session in this class — regardless of scenario. Retakes always use a
+  // DIFFERENT scenario than the original attempt, so scenarioId is NOT filtered.
   const priorFinalizedSession = await db.gradingSession.findFirst({
     where: {
       classId:   token.classId,
       studentId,
-      scenarioId,
+      // scenarioId intentionally omitted — retakes use a different scenario
       status:    'FINALIZED',
     },
     orderBy: { finalizedAt: 'desc' },
@@ -141,6 +148,54 @@ export async function submitGradesAction(
   })
 
   await processSession(session.id)
+
+  // ── "Edit My Submission" cleanup ──────────────────────────────────────────
+  // If the grader changed student or scenario, remove their assessment from the
+  // old (wrong) session and delete that session if it is now empty.
+  const isEditMode    = !!(originalStudentId && originalScenarioId && originalStaffMemberId)
+  const targetChanged = isEditMode && (
+    originalStudentId !== studentId || originalScenarioId !== scenarioId
+  )
+
+  if (targetChanged) {
+    const oldSession = await db.gradingSession.findFirst({
+      where: {
+        classId:    token.classId,
+        studentId:  originalStudentId!,
+        scenarioId: originalScenarioId!,
+        status:     { not: 'FINALIZED' },
+      },
+    })
+
+    if (oldSession) {
+      const oldAssessment = await db.graderAssessment.findUnique({
+        where: {
+          sessionId_staffMemberId: {
+            sessionId:     oldSession.id,
+            staffMemberId: originalStaffMemberId!,
+          },
+        },
+      })
+
+      if (oldAssessment) {
+        // Delete the stale assessment (cascade-deletes its criterion grades)
+        await db.graderAssessment.delete({ where: { id: oldAssessment.id } })
+
+        // Delete the old session entirely if it is now empty
+        const remaining = await db.graderAssessment.count({
+          where: { sessionId: oldSession.id },
+        })
+
+        if (remaining === 0) {
+          await db.gradingSession.delete({ where: { id: oldSession.id } })
+        } else {
+          // Still has other graders — reprocess so status stays accurate
+          await processSession(oldSession.id)
+        }
+      }
+    }
+  }
+
   // Pass back identifiers so the success screen can offer an "Edit My Submission" link
   redirect(
     `/grade?submitted=1` +

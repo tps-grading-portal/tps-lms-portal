@@ -83,6 +83,16 @@ export function GradeForm({
 
   return (
     <form action={formAction} className="space-y-4">
+      {/* When editing a previous submission, carry the original IDs so the
+          action can detect changes and remove the stale assessment. */}
+      {preSelectedStudentId && preSelectedScenarioId && preSelectedStaffMemberId && (
+        <>
+          <input type="hidden" name="originalStudentId"     value={preSelectedStudentId} />
+          <input type="hidden" name="originalScenarioId"    value={preSelectedScenarioId} />
+          <input type="hidden" name="originalStaffMemberId" value={preSelectedStaffMemberId} />
+        </>
+      )}
+
       {/* Selection row */}
       <div className="card space-y-3">
         <div>

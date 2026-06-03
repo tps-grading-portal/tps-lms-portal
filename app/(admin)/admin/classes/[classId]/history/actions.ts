@@ -13,10 +13,9 @@ export async function getAdminSessionData(classId: string) {
     db.gradingSession.findMany({
       where: { classId },
       orderBy: [
-        // Show active/adjusting sessions first, finalized below
-        { status: 'asc' },
-        { finalizedAt: 'desc' },
-        { createdAt: 'desc' },
+        // Stable sort by creation time — position never changes when status changes,
+        // so clicking Adjust always affects the card in the same screen position.
+        { createdAt: 'asc' },
       ],
       include: {
         student:  { select: { number: true, track: true } },
