@@ -152,9 +152,8 @@ export function AdminSessionGrid({ initialData, classId }: Props) {
   const handleReopen = async (sessionId: string) => {
     const result = await reopenSessionAction(sessionId)
     if (result.error) { setActionError(result.error); return }
-    // Refresh data after reopen
-    const { getAdminSessionData: fetch } = await import('./actions')
-    const fresh = await fetch(classId)
+    // Use the already-imported function — not a dynamic import (which was unreliable)
+    const fresh = await getAdminSessionData(classId)
     refresh(fresh)
   }
 

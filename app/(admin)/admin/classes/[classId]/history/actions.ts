@@ -3,6 +3,7 @@
 import { db } from '@/lib/db'
 import { auth } from '@/lib/auth'
 import { processSession } from '@/lib/session-processor'
+import { getCriteriaForClass } from '@/lib/criteria-utils'
 import { revalidatePath } from 'next/cache'
 
 // ── Fetch all sessions for the history page ───────────────────────────────────
@@ -39,10 +40,11 @@ export async function getAdminSessionData(classId: string) {
         },
       },
     }),
-    db.criterion.findMany({
-      select: { id: true, code: true, name: true, sortOrder: true },
-      orderBy: { sortOrder: 'asc' },
-    }),
+    // Use class-specific criteria snapshot if it exists, otherwise global template.
+    // Without this filter, both the template AND the snapshot appear, doubling every row.
+    getCriteriaForClass(classId).then((all) =>
+      all.map((c) => ({ id: c.id, code: c.code, name: c.name, sortOrder: c.sortOrder }))
+    ),
   ])
 
   return { sessions, criteria }
