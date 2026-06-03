@@ -15,7 +15,7 @@ export default async function AdminBuilderPage({ params }: PageProps) {
 
   const { formId } = await params
 
-  const [form, staffMembers] = await Promise.all([
+  const [form, staffMembers, classes] = await Promise.all([
     db.sandboxForm.findUnique({
       where:   { id: formId },
       include: { questions: { orderBy: { sortOrder: 'asc' } } },
@@ -24,6 +24,10 @@ export default async function AdminBuilderPage({ params }: PageProps) {
       where:   { isActive: true },
       orderBy: { name: 'asc' },
       select:  { id: true, name: true },
+    }),
+    db.class.findMany({
+      orderBy: { createdAt: 'desc' },
+      select:  { id: true, name: true, isActive: true, _count: { select: { students: true } } },
     }),
   ])
 
@@ -40,7 +44,7 @@ export default async function AdminBuilderPage({ params }: PageProps) {
         <span className="text-gray-900 font-medium">Builder</span>
       </div>
 
-      <AdminFormBuilder form={form} staffMembers={staffMembers} />
+      <AdminFormBuilder form={form} staffMembers={staffMembers} classes={classes} />
     </div>
   )
 }

@@ -104,12 +104,20 @@ function toQuestionDrafts(form: ExistingForm): QuestionDraft[] {
   })
 }
 
+interface ClassOption {
+  id:       string
+  name:     string
+  isActive: boolean
+  _count:   { students: number }
+}
+
 interface Props {
   form:         ExistingForm
   staffMembers: { id: string; name: string }[]
+  classes:      ClassOption[]
 }
 
-export function AdminFormBuilder({ form, staffMembers }: Props) {
+export function AdminFormBuilder({ form, staffMembers, classes }: Props) {
   const [title,        setTitle]        = useState(form.title)
   const [description,  setDescription]  = useState(form.description ?? '')
   const [mode,         setMode]         = useState(form.mode)
@@ -351,6 +359,7 @@ export function AdminFormBuilder({ form, staffMembers }: Props) {
                 q={q}
                 scoring={scoring}
                 formPredefined={predefined}
+                classes={classes}
                 onChange={(patch) => updateQ(i, patch)}
               />
             ) : (
@@ -464,13 +473,15 @@ export function AdminFormBuilder({ form, staffMembers }: Props) {
 // ── Repeating Section Editor ──────────────────────────────────────────────────
 
 function RepeatingSectionEditor({
-  q, scoring, formPredefined, onChange,
+  q, scoring, formPredefined, classes, onChange,
 }: {
   q:              QuestionDraft
   scoring:        boolean
-  formPredefined: string   // form-level predefined subjects (newline-separated)
+  formPredefined: string
+  classes:        ClassOption[]
   onChange:       (p: Partial<QuestionDraft>) => void
 }) {
+  const [importClassId, setImportClassId] = useState('')
   const addSQ = () => onChange({
     subQuestions: [...q.subQuestions, { id: `sq_${Date.now()}`, label: '', type: 'GRADE_1_8', subWeight: '100' }],
   })
@@ -513,29 +524,59 @@ function RepeatingSectionEditor({
 
       {/* Section-level predefined list */}
       {q.subjectSource === 'predefined' && (
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="field-label text-xs mb-0">People to grade (one per line)</label>
-            {formPredefined.trim() && (
+        <div className="space-y-2">
+          <label className="field-label text-xs mb-0">People to grade (one per line)</label>
+
+          {/* Import from Comp Oral class */}
+          {classes.length > 0 && (
+            <div className="flex gap-2 items-center">
+              <select
+                value={importClassId}
+                onChange={(e) => setImportClassId(e.target.value)}
+                className="field-select text-sm flex-1"
+              >
+                <option value="">— Import from Comp Oral class —</option>
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}{c.isActive ? ' (active)' : ''} — {c._count.students} students
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
-                onClick={() => onChange({ predefinedList: formPredefined })}
-                className="text-xs text-tps-orange hover:underline"
-                title="Copy the form-level subject list into this section"
+                disabled={!importClassId}
+                onClick={async () => {
+                  if (!importClassId) return
+                  const cls = classes.find((c) => c.id === importClassId)
+                  if (!cls) return
+                  // Fetch students for this class
+                  const res = await fetch(`/api/admin/class-students?classId=${importClassId}`)
+                  if (!res.ok) return
+                  const { students } = await res.json() as { students: { number: number; track: string }[] }
+                  const names = students
+                    .sort((a, b) => a.number - b.number)
+                    .map((s) => `${cls.name}-${s.number}`)
+                    .join('\n')
+                  onChange({ predefinedList: names })
+                  setImportClassId('')
+                }}
+                className="btn-secondary text-xs flex-shrink-0"
               >
-                Import from form subjects
+                Load students
               </button>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* Manual list */}
           <textarea
             value={q.predefinedList}
             onChange={(e) => onChange({ predefinedList: e.target.value })}
-            rows={5}
-            placeholder={"Capt Smith\nMaj Jones\nLt Col Davis"}
+            rows={6}
+            placeholder={"26A-1\n26A-2\n26A-3\n…or type any names/identifiers"}
             className="field-input resize-y font-mono text-sm"
           />
-          <p className="text-[10px] text-gray-400 mt-1">
-            These names appear on the submission form so graders select from them.
+          <p className="text-[10px] text-gray-400">
+            Graders will choose from this list — they are <strong>not</strong> required to grade everyone on it.
           </p>
         </div>
       )}

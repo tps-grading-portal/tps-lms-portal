@@ -289,33 +289,85 @@ function RepeatingSectionInput({
   const updateEntry = (i: number, field: string, val: string) =>
     setEntries(entries.map((e, idx) => idx === i ? { ...e, [field]: val } : e))
 
+  const isPredefined = config?.subjectSource === 'predefined' && effectiveSubjects.length > 0
+  const selectedSet  = new Set(entries.map((e) => e.subject))
+
+  const toggleSubject = (subject: string) => {
+    if (selectedSet.has(subject)) {
+      setEntries(entries.filter((e) => e.subject !== subject))
+    } else {
+      setEntries([...entries, { subject }])
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 text-xs text-tps-orange font-medium">
         Grade each person individually below
       </div>
 
-      {/* Pre-defined subject list: render all at once */}
-      {config?.subjectSource === 'predefined' && effectiveSubjects.length > 0 ? (
-        effectiveSubjects.map((subject, si) => {
-          const entry = entries.find((e) => e.subject === subject) ?? { subject }
-          const entryIdx = entries.findIndex((e) => e.subject === subject)
-          const handleEntry = (field: string, val: string) => {
-            if (entryIdx >= 0) updateEntry(entryIdx, field, val)
-            else setEntries([...entries, { subject, [field]: val }])
-          }
-          return (
-            <div key={si} className="card border border-orange-100 space-y-3">
-              <p className="font-semibold text-sm text-tps-navy">{subject}</p>
-              {subQs.map((sq) => (
-                <GradeSubQuestion key={sq.id} sq={sq} value={entry[sq.id] ?? ''}
-                  onChange={(v) => handleEntry(sq.id, v)} />
+      {isPredefined ? (
+        <>
+          {/* Step 1: select who you're grading */}
+          <div className="card border border-orange-100 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Select people to grade</p>
+              <div className="flex gap-2 text-xs">
+                <button type="button" className="text-tps-orange hover:underline"
+                  onClick={() => setEntries(effectiveSubjects.map((s) => entries.find((e) => e.subject === s) ?? { subject: s }))}>
+                  All
+                </button>
+                <button type="button" className="text-gray-400 hover:underline"
+                  onClick={() => setEntries([])}>
+                  None
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+              {effectiveSubjects.map((subject) => (
+                <label key={subject}
+                  className={cn('flex items-center gap-2 px-2 py-1.5 rounded-lg border cursor-pointer text-sm transition-colors',
+                    selectedSet.has(subject)
+                      ? 'border-tps-orange bg-orange-50 text-tps-navy font-medium'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  )}>
+                  <input type="checkbox" className="h-3.5 w-3.5 accent-tps-orange flex-shrink-0"
+                    checked={selectedSet.has(subject)}
+                    onChange={() => toggleSubject(subject)} />
+                  <span className="truncate font-mono text-xs">{subject}</span>
+                </label>
               ))}
             </div>
-          )
-        })
+            {entries.length > 0 && (
+              <p className="text-[10px] text-gray-400">{entries.length} selected — fill in grades below</p>
+            )}
+          </div>
+
+          {/* Step 2: grade cards for selected people only */}
+          {entries.map((entry, ei) => {
+            const entryIdx = ei
+            const handleEntry = (field: string, val: string) => updateEntry(entryIdx, field, val)
+            return (
+              <div key={entry.subject} className="card border border-orange-100 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-sm text-tps-navy font-mono">{entry.subject}</p>
+                  <button type="button" onClick={() => toggleSubject(entry.subject)}
+                    className="text-xs text-gray-400 hover:text-red-500">Remove</button>
+                </div>
+                {subQs.map((sq) => (
+                  <GradeSubQuestion key={sq.id} sq={sq} value={entry[sq.id] ?? ''}
+                    onChange={(v) => handleEntry(sq.id, v)} />
+                ))}
+              </div>
+            )
+          })}
+
+          {entries.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-2">Check the boxes above to select who you&apos;re grading.</p>
+          )}
+        </>
       ) : (
-        /* Free-text: grader adds people */
+        /* Free-text: grader adds people manually */
         <>
           {entries.map((entry, ei) => (
             <div key={ei} className="card border border-orange-100 space-y-3">
