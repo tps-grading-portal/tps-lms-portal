@@ -33,7 +33,7 @@ export default async function SandboxResultsPage({ params }: PageProps) {
             <p className="text-white font-semibold text-sm leading-none mt-0.5">{form.title}</p>
           </div>
         </div>
-        <a href={`/api/sandbox/export/${slug}`} className="btn-secondary text-xs border-white text-white hover:border-tps-orange hover:text-tps-orange">
+        <a href={`/api/sandbox/export/${slug}`} className="btn-secondary text-xs border-tps-orange text-tps-orange">
           ↓ Download Excel
         </a>
       </header>
