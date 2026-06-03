@@ -366,10 +366,27 @@ model SandboxForm {
   isActive           Boolean             @default(true)
   createdAt          DateTime            @default(now())
 
-  questions   SandboxQuestion[]
-  submissions SandboxSubmission[]
+  questions     SandboxQuestion[]
+  submissions   SandboxSubmission[]
+  accessGranted SandboxResultsAccess[] @relation("AccessGranted")
+  accessTargets SandboxResultsAccess[] @relation("AccessTarget")
 
   @@map("sandbox_forms")
+}
+
+// Admin grants one form's results-viewer read access to another form's results
+model SandboxResultsAccess {
+  id              String   @id @default(cuid())
+  grantedToFormId String   // the form whose results-PIN-holder gets access
+  targetFormId    String   // the form they can read
+  grantedByAdmin  String
+  grantedAt       DateTime @default(now())
+
+  grantedToForm SandboxForm @relation("AccessGranted", fields: [grantedToFormId], references: [id], onDelete: Cascade)
+  targetForm    SandboxForm @relation("AccessTarget",  fields: [targetFormId],    references: [id], onDelete: Cascade)
+
+  @@unique([grantedToFormId, targetFormId])
+  @@map("sandbox_results_access")
 }
 
 // A question on a sandbox form

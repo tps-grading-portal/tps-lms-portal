@@ -290,7 +290,7 @@ export function FormBuilder({ token, existingForm, staffMembers, baseUrl }: Prop
 
       {/* Questions */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between sticky top-14 z-10 bg-gray-50 py-2 -mx-4 px-4 border-b border-gray-100">
           <h2 className="font-semibold text-gray-800">
             Questions ({questions.length})
             {scoring && (
@@ -322,6 +322,10 @@ export function FormBuilder({ token, existingForm, staffMembers, baseUrl }: Prop
             onMove={(dir) => moveQ(i, dir)}
           />
         ))}
+
+        <button onClick={addQuestion} className="w-full border-2 border-dashed border-gray-300 rounded-xl py-3 text-sm text-gray-400 hover:border-tps-orange hover:text-tps-orange transition-colors">
+          + Add another question
+        </button>
       </section>
 
       {error && (

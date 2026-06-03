@@ -139,6 +139,97 @@ export async function adminCreateFormAction(
   })
 
   revalidatePath('/admin/sandbox')
-  // Return the plain-text PIN so the UI can display it once
   return { formId: form.id, pin: defaultPin }
+}
+
+// ── Duplicate a form ──────────────────────────────────────────────────────────
+
+export async function duplicateSandboxFormAction(
+  sourceFormId: string,
+  newTitle:     string,
+): Promise<{ formId?: string; pin?: string; error?: string }> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+
+  const source = await db.sandboxForm.findUnique({
+    where:   { id: sourceFormId },
+    include: { questions: { orderBy: { sortOrder: 'asc' } } },
+  })
+  if (!source) return { error: 'Source form not found.' }
+
+  const { submitSlug, resultsSlug } = await generateFormSlugs()
+  const pin     = Array.from({ length: 6 }, () => Math.floor(Math.random() * 10)).join('')
+  const pinHash = await hashPin(pin)
+
+  const newForm = await db.sandboxForm.create({
+    data: {
+      title:              newTitle || `${source.title} (copy)`,
+      description:        source.description,
+      mode:               source.mode,
+      subjectEntry:       source.subjectEntry,
+      graderEntry:        source.graderEntry,
+      predefinedSubjects: source.predefinedSubjects ?? undefined,
+      scoringEnabled:     source.scoringEnabled,
+      submitSlug,
+      resultsSlug,
+      submitPinHash:  pinHash,
+      resultsPinHash: pinHash,
+      samePinWarning: true,
+    },
+  })
+
+  // Clone all questions
+  if (source.questions.length > 0) {
+    await db.sandboxQuestion.createMany({
+      data: source.questions.map((q) => ({
+        formId:       newForm.id,
+        questionType: q.questionType,
+        label:        q.label,
+        description:  q.description,
+        sectionLabel: q.sectionLabel,
+        options:      q.options ?? undefined,
+        scaleMin:     q.scaleMin,
+        scaleMax:     q.scaleMax,
+        pointMap:     q.pointMap ?? undefined,
+        weight:       q.weight,
+        isRequired:   q.isRequired,
+        sortOrder:    q.sortOrder,
+      })),
+    })
+  }
+
+  revalidatePath('/admin/sandbox')
+  return { formId: newForm.id, pin }
+}
+
+// ── Cross-survey read access (admin UI wrappers) ──────────────────────────────
+
+export async function adminGrantAccessAction(
+  grantedToFormId: string,
+  targetFormId:    string,
+): Promise<{ error?: string }> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+  if (grantedToFormId === targetFormId) return { error: 'Cannot grant access to the same form.' }
+
+  await db.sandboxResultsAccess.upsert({
+    where:  { grantedToFormId_targetFormId: { grantedToFormId, targetFormId } },
+    update: {},
+    create: { grantedToFormId, targetFormId, grantedByAdmin: session.user?.name ?? 'admin' },
+  })
+
+  revalidatePath(`/admin/sandbox/${targetFormId}`)
+  return {}
+}
+
+export async function adminRevokeAccessAction(
+  grantedToFormId: string,
+  targetFormId:    string,
+): Promise<{ error?: string }> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+
+  await db.sandboxResultsAccess.deleteMany({ where: { grantedToFormId, targetFormId } })
+  revalidatePath(`/admin/sandbox/${targetFormId}`)
+  return {}
 }

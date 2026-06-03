@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo, useTransition } from 'react'
 import { aggregateBySubject, generateLLMPrompt, assignRankStatus } from '@/lib/sandbox-scoring'
+import { editSandboxSubmissionAction, deleteSandboxSubmissionAction } from './actions'
 import { cn } from '@/lib/utils'
 
 type Question = {
@@ -25,10 +26,16 @@ interface Props {
 type Tab = 'summary' | 'subjects' | 'questions' | 'raw' | 'llm'
 
 export function SandboxResultsViewer({ form, questions, initialSubmissions, slug }: Props) {
-  const [submissions, setSubmissions] = useState<Submission[]>(initialSubmissions)
-  const [activeTab,   setActiveTab]   = useState<Tab>('summary')
-  const [topN,        setTopN]        = useState(5)
-  const [llmCopied,   setLlmCopied]   = useState(false)
+  const [submissions,   setSubmissions]   = useState<Submission[]>(initialSubmissions)
+  const [activeTab,     setActiveTab]     = useState<Tab>('summary')
+  const [topN,          setTopN]          = useState(5)
+  const [llmCopied,     setLlmCopied]     = useState(false)
+  const [gradecard,     setGradecard]     = useState<Submission | null>(null)
+  const [editMode,      setEditMode]      = useState(false)
+  const [editAnswers,   setEditAnswers]   = useState<Record<string, unknown>>({})
+  const [deleteTarget,  setDeleteTarget]  = useState<string | null>(null)
+  const [actionPending, setActionPending] = useState(false)
+  const [,              startT]           = useTransition()
   const esRef = useRef<EventSource | null>(null)
 
   // SSE — live updates
@@ -71,6 +78,49 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
     [aggregates, topN]
   )
 
+  // ── Gradecard handlers ──────────────────────────────────────────────────────
+  const openGradecard = (s: Submission) => {
+    setGradecard(s)
+    setEditMode(false)
+    setEditAnswers({ ...s.answers })
+  }
+
+  const handleEditSave = async () => {
+    if (!gradecard) return
+    setActionPending(true)
+    await editSandboxSubmissionAction(gradecard.id, slug, editAnswers)
+    setActionPending(false)
+    setEditMode(false)
+    setGradecard(null)
+  }
+
+  const handleDelete = async (submissionId: string) => {
+    setActionPending(true)
+    await deleteSandboxSubmissionAction(submissionId, slug)
+    setActionPending(false)
+    setDeleteTarget(null)
+    setGradecard(null)
+    startT(() => setSubmissions((prev) => prev.filter((s) => s.id !== submissionId)))
+  }
+
+  // Format an answer value for display
+  const formatAnswer = (val: unknown, q: Question): string => {
+    if (val === undefined || val === null || val === '') return '—'
+    if (Array.isArray(val)) return val.join(', ')
+    if (q.questionType === 'GRADE_1_8') {
+      const n = parseInt(String(val))
+      const labels = ['','Well Above Avg','Above Avg','Slightly Above Avg','Average','Slightly Below Avg','Below Avg','Well Below Avg','Fail']
+      return `${n} — ${labels[n] ?? ''}`
+    }
+    return String(val)
+  }
+
+  // Short label for column headers (first 4 words + ellipsis if longer)
+  const shortLabel = (label: string): string => {
+    const words = label.split(' ')
+    return words.length <= 4 ? label : words.slice(0, 4).join(' ') + '…'
+  }
+
   const llmPrompt = useMemo(
     () => generateLLMPrompt(
       { title: form.title, description: form.description, mode: form.mode },
@@ -94,6 +144,7 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
   ]
 
   return (
+    <>
     <div className="space-y-6">
       {/* Stats bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -310,34 +361,50 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
               <tr>
                 <th className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Submitted</th>
                 {form.mode === 'GRADER' && <th className="px-3 py-2 text-left font-semibold text-gray-600">Subject</th>}
-                <th className="px-3 py-2 text-left font-semibold text-gray-600">Grader</th>
+                <th className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Grader / Respondent</th>
                 {questions.map((q) => (
-                  <th key={q.id} className="px-3 py-2 text-left font-semibold text-gray-600 max-w-[120px]">
-                    <span className="block truncate">{q.label}</span>
+                  <th key={q.id} className="px-3 py-2 text-left font-semibold text-gray-600 min-w-[80px] max-w-[140px]">
+                    <span title={q.label} className="block truncate cursor-help">{shortLabel(q.label)}</span>
                   </th>
                 ))}
                 {form.scoringEnabled && <th className="px-3 py-2 text-left font-semibold text-gray-600">Score</th>}
+                <th className="px-3 py-2 text-left font-semibold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {submissions.map((s) => (
-                <tr key={s.id} className="bg-white hover:bg-gray-50">
-                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{new Date(s.submittedAt).toLocaleString()}</td>
+                <tr key={s.id} className="bg-white hover:bg-gray-50 cursor-pointer group" onClick={() => openGradecard(s)}>
+                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{new Date(s.submittedAt).toLocaleDateString()}</td>
                   {form.mode === 'GRADER' && <td className="px-3 py-2 font-medium">{s.subjectName ?? '—'}</td>}
                   <td className="px-3 py-2 text-gray-500">{s.graderName ?? '—'}</td>
-                  {questions.map((q) => (
-                    <td key={q.id} className="px-3 py-2 text-gray-700">
-                      {(() => {
-                        const val = s.answers[q.id]
-                        if (val === undefined || val === null || val === '') return <span className="text-gray-300">—</span>
-                        if (Array.isArray(val)) return val.join(', ')
-                        return String(val)
-                      })()}
-                    </td>
-                  ))}
+                  {questions.map((q) => {
+                    const val = s.answers[q.id]
+                    const display = val === undefined || val === null || val === ''
+                      ? <span className="text-gray-300">—</span>
+                      : q.questionType === 'GRADE_1_8'
+                        ? <span className={cn('font-bold', parseInt(String(val)) === 8 ? 'text-red-600' : parseInt(String(val)) <= 2 ? 'text-green-600' : 'text-gray-700')}>{String(val)}</span>
+                        : q.questionType === 'TEXT'
+                          ? <span className="text-gray-600 truncate max-w-[120px] block" title={String(val)}>{String(val).slice(0, 40)}{String(val).length > 40 ? '…' : ''}</span>
+                          : Array.isArray(val) ? <span>{val.join(', ')}</span> : <span>{String(val)}</span>
+                    return <td key={q.id} className="px-3 py-2 text-gray-700">{display}</td>
+                  })}
                   {form.scoringEnabled && (
-                    <td className="px-3 py-2 font-bold font-mono">{s.totalScore?.toFixed(2) ?? '—'}</td>
+                    <td className="px-3 py-2 font-bold font-mono">
+                      <span className={cn(s.totalScore !== null && s.totalScore >= 70 ? 'text-green-700' : s.totalScore !== null ? 'text-red-600' : 'text-gray-400')}>
+                        {s.totalScore?.toFixed(1) ?? '—'}
+                      </span>
+                    </td>
                   )}
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => openGradecard(s)} className="text-tps-orange hover:text-orange-700 text-xs px-1.5 py-1 rounded hover:bg-orange-50" title="View gradecard">
+                        ↗
+                      </button>
+                      <button onClick={() => setDeleteTarget(s.id)} className="text-red-400 hover:text-red-600 text-xs px-1.5 py-1 rounded hover:bg-red-50" title="Delete submission">
+                        🗑
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {submissions.length === 0 && (
@@ -345,6 +412,7 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
               )}
             </tbody>
           </table>
+          <p className="text-xs text-gray-400 px-3 py-2 border-t">Click any row to view full gradecard. Hover a row to see action buttons.</p>
         </div>
       )}
 
@@ -369,5 +437,121 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
         </div>
       )}
     </div>
+    {/* ── Gradecard modal ──────────────────────────────────────────────────── */}
+    {gradecard && (
+      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => { setGradecard(null); setEditMode(false) }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          {/* Header */}
+          <div className="bg-tps-navy text-white px-5 py-4 rounded-t-2xl flex items-start justify-between">
+            <div>
+              <p className="text-tps-gold text-[9px] font-bold tracking-widest uppercase">Submission Gradecard</p>
+              <p className="font-semibold text-sm mt-0.5">
+                {gradecard.subjectName || gradecard.graderName || 'Anonymous'}
+              </p>
+              <p className="text-tps-silver text-xs mt-0.5">{new Date(gradecard.submittedAt).toLocaleString()}</p>
+            </div>
+            <button onClick={() => { setGradecard(null); setEditMode(false) }} className="text-tps-silver hover:text-white text-xl min-h-[44px] min-w-[44px] flex items-center justify-center">×</button>
+          </div>
+
+          <div className="p-5 space-y-4">
+            {/* Meta */}
+            <div className="flex gap-4 text-sm text-gray-600">
+              {gradecard.subjectName && <span><strong>Subject:</strong> {gradecard.subjectName}</span>}
+              {gradecard.graderName  && <span><strong>By:</strong> {gradecard.graderName}</span>}
+              {gradecard.totalScore !== null && (
+                <span className={cn('font-bold ml-auto', gradecard.totalScore >= 70 ? 'text-green-700' : 'text-red-600')}>
+                  Score: {gradecard.totalScore.toFixed(1)}
+                </span>
+              )}
+            </div>
+
+            {/* Questions */}
+            {questions.map((q) => {
+              const rawVal  = editMode ? editAnswers[q.id] : gradecard.answers[q.id]
+              const display = formatAnswer(rawVal, q)
+              const opts    = Array.isArray(q.options) ? (q.options as string[]) : []
+
+              return (
+                <div key={q.id} className="border-b border-gray-100 pb-3 last:border-0">
+                  <p className="text-xs font-semibold text-gray-700 mb-1">{q.label}</p>
+                  {!editMode ? (
+                    <p className={cn('text-sm', display === '—' ? 'text-gray-400 italic' : 'text-gray-900')}>{display}</p>
+                  ) : (
+                    <>
+                      {q.questionType === 'GRADE_1_8' && (
+                        <div className="grid grid-cols-8 gap-1">
+                          {[1,2,3,4,5,6,7,8].map((v) => (
+                            <button key={v} type="button"
+                              onClick={() => setEditAnswers((a) => ({ ...a, [q.id]: String(v) }))}
+                              className={cn('rounded border min-h-[36px] text-sm font-bold transition-all',
+                                String(editAnswers[q.id]) === String(v) ? 'bg-tps-orange text-white border-tps-orange' : 'border-gray-200 text-gray-600 hover:border-gray-400'
+                              )}>
+                              {v}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {(q.questionType === 'NUMERIC' || q.questionType === 'NUMBER') && (
+                        <input type="number" value={String(editAnswers[q.id] ?? '')}
+                          onChange={(e) => setEditAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                          min={q.scaleMin ?? undefined} max={q.scaleMax ?? undefined}
+                          className="field-input w-32" />
+                      )}
+                      {q.questionType === 'MULTIPLE_CHOICE' && (
+                        <select value={String(editAnswers[q.id] ?? '')}
+                          onChange={(e) => setEditAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                          className="field-select text-sm">
+                          <option value="">—</option>
+                          {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      )}
+                      {q.questionType === 'TEXT' && (
+                        <textarea value={String(editAnswers[q.id] ?? '')}
+                          onChange={(e) => setEditAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                          rows={3} className="field-input resize-y text-sm" />
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            })}
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-2">
+              {!editMode ? (
+                <>
+                  <button onClick={() => setEditMode(true)} className="btn-secondary text-sm flex-1">✎ Edit</button>
+                  <button onClick={() => setDeleteTarget(gradecard.id)} className="btn-danger text-sm">Delete</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => setEditMode(false)} className="btn-secondary text-sm">Cancel</button>
+                  <button onClick={handleEditSave} disabled={actionPending} className="btn-primary text-sm flex-1">
+                    {actionPending ? 'Saving…' : 'Save Changes'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Delete confirmation ──────────────────────────────────────────────── */}
+    {deleteTarget && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeleteTarget(null)}>
+        <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+          <p className="font-semibold text-gray-800">Delete this submission?</p>
+          <p className="text-sm text-gray-500">This cannot be undone. The submission will be permanently removed.</p>
+          <div className="flex gap-2">
+            <button onClick={() => setDeleteTarget(null)} className="btn-secondary flex-1 text-sm">Cancel</button>
+            <button onClick={() => handleDelete(deleteTarget)} disabled={actionPending} className="btn-danger flex-1 text-sm">
+              {actionPending ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
   )
 }

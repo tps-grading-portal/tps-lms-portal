@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
+import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import ExcelJS from 'exceljs'
 import { aggregateBySubject } from '@/lib/sandbox-scoring'
@@ -9,11 +10,15 @@ const secret = new TextEncoder().encode(process.env.AUTH_SECRET ?? '')
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
 
-  // Accept results PIN cookie OR admin session
+  // Accept: results PIN cookie, admin session, or access-granted form results cookie
   const cookieName = `sbx_results_${slug.slice(0, 16)}`
-  const token = req.cookies.get(cookieName)?.value
-  if (!token) return new NextResponse('Unauthorized', { status: 401 })
-  try { await jwtVerify(token, secret) } catch { return new NextResponse('Unauthorized', { status: 401 }) }
+  const pinToken   = req.cookies.get(cookieName)?.value
+  const adminSession = await auth()
+
+  if (!pinToken && !adminSession) return new NextResponse('Unauthorized', { status: 401 })
+  if (pinToken) {
+    try { await jwtVerify(pinToken, secret) } catch { if (!adminSession) return new NextResponse('Unauthorized', { status: 401 }) }
+  }
 
   const form = await db.sandboxForm.findUnique({
     where:   { resultsSlug: slug },

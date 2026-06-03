@@ -25,11 +25,15 @@ export default async function SandboxResultsPage({ params }: PageProps) {
   return (
     <main className="min-h-screen bg-gray-50 pb-16">
       <header className="bg-tps-navy text-white px-4 h-14 flex items-center justify-between border-b-2 border-tps-orange sticky top-0 z-20">
-        <div>
-          <p className="text-tps-gold font-bold text-[9px] tracking-widest uppercase leading-none">The Sandbox — Results</p>
-          <p className="text-white font-semibold text-sm leading-none mt-0.5">{form.title}</p>
+        <div className="flex items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/grad-patch.png" alt="TPS" width={28} height={28} className="object-contain" />
+          <div>
+            <p className="text-tps-gold font-bold text-[9px] tracking-widest uppercase leading-none">The Sandbox — Results</p>
+            <p className="text-white font-semibold text-sm leading-none mt-0.5">{form.title}</p>
+          </div>
         </div>
-        <a href={`/api/sandbox/export/${slug}`} className="text-xs text-tps-gold hover:text-white border border-tps-gold hover:border-white px-3 py-1.5 rounded-lg transition-colors">
+        <a href={`/api/sandbox/export/${slug}`} className="btn-secondary text-xs border-tps-gold text-tps-gold hover:text-white hover:border-white">
           ↓ Download Excel
         </a>
       </header>

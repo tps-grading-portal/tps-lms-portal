@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { revokeAndDeleteInviteAction, deleteSandboxFormAction } from './actions'
+import { revokeAndDeleteInviteAction, deleteSandboxFormAction, duplicateSandboxFormAction } from './actions'
 import { cn } from '@/lib/utils'
 
 type Invite = {
@@ -31,7 +31,7 @@ type StandaloneForm = {
   resultsSlug: string
   isActive:    boolean
   createdAt:   Date
-  _count: { submissions: number }
+  _count:      { submissions: number }
 }
 
 interface Props {
@@ -40,8 +40,10 @@ interface Props {
 }
 
 export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [confirmId,  setConfirmId]  = useState<string | null>(null)
+  const [deletingId,   setDeletingId]   = useState<string | null>(null)
+  const [confirmId,    setConfirmId]    = useState<string | null>(null)
+  const [duplicating,  setDuplicating]  = useState<string | null>(null)
+  const [dupResult,    setDupResult]    = useState<{ formId: string; pin: string } | null>(null)
 
   const handleRevokeInvite = async (inviteId: string) => {
     setDeletingId(inviteId)
@@ -55,6 +57,13 @@ export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
     await deleteSandboxFormAction(formId)
     setDeletingId(null)
     setConfirmId(null)
+  }
+
+  const handleDuplicate = async (formId: string, title: string) => {
+    setDuplicating(formId)
+    const res = await duplicateSandboxFormAction(formId, `${title} (copy)`)
+    setDuplicating(null)
+    if (res.formId && res.pin) setDupResult({ formId: res.formId, pin: res.pin })
   }
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
@@ -128,18 +137,23 @@ export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
                 <p className="text-xs text-amber-600">Awaiting creator — form not yet built</p>
               )}
 
-              {/* Delete confirmation */}
+              {/* Delete confirmation — two-step with download */}
               {confirmId === invite.id && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-3">
                   <p className="text-sm font-semibold text-red-800">
                     Revoke this invite and delete the form + all {invite.form?._count.submissions ?? 0} submissions?
                   </p>
                   {invite.form && invite.form._count.submissions > 0 && (
-                    <p className="text-xs text-red-600">
-                      ⚠ Download the results first from{' '}
-                      <a href={`/sandbox/${invite.form.resultsSlug}/results`} target="_blank"
-                         className="underline">the results page</a> if you need them.
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-xs text-red-700 font-medium">Download results before deleting:</p>
+                      <a
+                        href={`/api/sandbox/export/${invite.form.resultsSlug}`}
+                        className="btn-secondary text-xs inline-flex"
+                        target="_blank"
+                      >
+                        ↓ Download Results (Excel)
+                      </a>
+                    </div>
                   )}
                   <div className="flex gap-2">
                     <button onClick={() => setConfirmId(null)} className="btn-secondary text-xs">Cancel</button>
@@ -176,25 +190,31 @@ export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
                 </div>
                 <div className="flex gap-2">
                   <Link href={`/admin/sandbox/${form.id}`} className="btn-secondary text-xs">Manage</Link>
-                  <button
-                    onClick={() => setConfirmId(form.id)}
-                    className="text-xs text-red-400 hover:text-red-600 min-h-[32px] px-2"
-                  >
+                  <button onClick={() => handleDuplicate(form.id, form.title)} disabled={duplicating === form.id}
+                    className="btn-secondary text-xs">
+                    {duplicating === form.id ? '…' : '⎘ Duplicate'}
+                  </button>
+                  <button onClick={() => setConfirmId(form.id)} className="text-xs text-red-400 hover:text-red-600 min-h-[32px] px-2">
                     Delete
                   </button>
                 </div>
                 {confirmId === form.id && (
-                  <div className="w-full bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
+                  <div className="w-full bg-red-50 border border-red-200 rounded-lg p-3 space-y-3">
                     <p className="text-sm font-semibold text-red-800">
                       Delete this form and all {form._count.submissions} submission{form._count.submissions !== 1 ? 's' : ''}?
                     </p>
+                    {form._count.submissions > 0 && (
+                      <div>
+                        <p className="text-xs text-red-700 font-medium mb-1">Download results before deleting:</p>
+                        <a href={`/api/sandbox/export/${(form as { resultsSlug?: string }).resultsSlug ?? ''}`}
+                           className="btn-secondary text-xs inline-flex" target="_blank">
+                          ↓ Download Results (Excel)
+                        </a>
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <button onClick={() => setConfirmId(null)} className="btn-secondary text-xs">Cancel</button>
-                      <button
-                        onClick={() => handleDeleteForm(form.id)}
-                        disabled={deletingId === form.id}
-                        className="btn-danger text-xs"
-                      >
+                      <button onClick={() => handleDeleteForm(form.id)} disabled={deletingId === form.id} className="btn-danger text-xs">
                         {deletingId === form.id ? 'Deleting…' : 'Confirm Delete'}
                       </button>
                     </div>
@@ -204,6 +224,25 @@ export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
             ))}
           </div>
         </section>
+      )}
+      {/* Duplicate result */}
+      {dupResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDupResult(null)}>
+          <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-bold text-tps-navy">Form Duplicated</h2>
+            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-bold text-amber-800">⚠️ Save this PIN — it won&apos;t be shown again</p>
+              <p className="font-mono text-2xl font-bold tracking-widest">{dupResult.pin}</p>
+              <p className="text-xs text-amber-700">Same PIN for both submission and results. Change in the builder.</p>
+            </div>
+            <div className="flex gap-2">
+              <Link href={`/admin/sandbox/${dupResult.formId}/builder`} className="btn-primary text-sm flex-1" onClick={() => setDupResult(null)}>
+                Build Questions →
+              </Link>
+              <button onClick={() => setDupResult(null)} className="btn-secondary text-sm">Close</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

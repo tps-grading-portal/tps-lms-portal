@@ -26,15 +26,22 @@ interface Question {
 }
 
 interface Props {
-  form:         { id: string; mode: string; subjectEntry: string; graderEntry: string; predefinedSubjects: unknown; scoringEnabled: boolean }
-  questions:    Question[]
-  staffMembers: { id: string; name: string }[]
-  slug:         string
+  form:           { id: string; mode: string; subjectEntry: string; graderEntry: string; predefinedSubjects: unknown; scoringEnabled: boolean }
+  questions:      Question[]
+  staffMembers:   { id: string; name: string }[]
+  slug:           string
+  initialAnswers: Record<string, unknown>
+  editId:         string | null
 }
 
-export function SandboxSubmitForm({ form, questions, staffMembers, slug }: Props) {
+export function SandboxSubmitForm({ form, questions, staffMembers, slug, initialAnswers, editId }: Props) {
   const [error, formAction, pending] = useActionState(submitSandboxAction, null)
-  const [answers, setAnswers] = useState<Record<string, string | string[]>>({})
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>(
+    // Convert initialAnswers to the right types for pre-population
+    Object.fromEntries(
+      Object.entries(initialAnswers).map(([k, v]) => [k, Array.isArray(v) ? v as string[] : String(v ?? '')])
+    )
+  )
   const [expandedQ, setExpandedQ] = useState<string | null>(null)
 
   const predefined = Array.isArray(form.predefinedSubjects) ? (form.predefinedSubjects as string[]) : []
@@ -72,6 +79,7 @@ export function SandboxSubmitForm({ form, questions, staffMembers, slug }: Props
       <input type="hidden" name="formId"  value={form.id} />
       <input type="hidden" name="slug"    value={slug} />
       <input type="hidden" name="answers" value={JSON.stringify(answers)} />
+      {editId && <input type="hidden" name="editId" value={editId} />}
 
       {/* Identity fields */}
       <div className="card space-y-3">
@@ -232,7 +240,7 @@ export function SandboxSubmitForm({ form, questions, staffMembers, slug }: Props
           className={cn('btn w-full text-base py-4 shadow-lg',
             allRequired ? 'btn-primary' : 'bg-gray-200 text-gray-400 rounded-lg cursor-not-allowed min-h-[44px]'
           )}>
-          {pending ? 'Submitting…' : 'Submit'}
+          {pending ? 'Submitting…' : editId ? 'Save Changes' : 'Submit'}
         </button>
       </div>
     </form>
