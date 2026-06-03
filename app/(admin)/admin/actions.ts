@@ -134,3 +134,45 @@ export async function rotatePinAction(
 
   return { success: true, role, newPin }
 }
+
+// ── Delete Class (irreversible — requires triple confirmation in the UI) ───────
+
+export async function deleteClassAction(
+  classId: string,
+  confirmName: string,
+): Promise<{ error?: string; success?: boolean }> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+
+  const cls = await db.class.findUnique({
+    where: { id: classId },
+    select: { name: true, _count: { select: { sessions: true, students: true } } },
+  })
+  if (!cls) return { error: 'Class not found.' }
+
+  // Final server-side name check — belt and suspenders on top of the UI guard
+  if (confirmName.trim().toUpperCase() !== cls.name.toUpperCase()) {
+    return { error: 'Class name confirmation does not match.' }
+  }
+
+  // Clear retakeSourceId self-references before deleting sessions
+  await db.gradingSession.updateMany({
+    where: { classId, retakeSourceId: { not: null } },
+    data:  { retakeSourceId: null },
+  })
+
+  // Delete sessions (cascades to GraderAssessment → CriterionGrade)
+  await db.gradingSession.deleteMany({ where: { classId } })
+
+  // Delete survey responses (no cascade defined on Class → these)
+  await db.studentSurveyResponse.deleteMany({ where: { classId } })
+  await db.instructorSurveyResponse.deleteMany({ where: { classId } })
+
+  // Delete the class — cascades to: students, class_access, criteria, survey_question_templates
+  await db.class.delete({ where: { id: classId } })
+
+  revalidatePath('/admin')
+  revalidatePath('/admin/classes')
+
+  return { success: true }
+}

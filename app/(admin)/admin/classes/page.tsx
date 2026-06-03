@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import Link from 'next/link'
 import { setActiveClassAction, deactivateClassAction } from '../actions'
+import { DeleteClassButton } from './delete-class-button'
 import { PASSING_SCORE } from '@/lib/constants'
 import type { Metadata } from 'next'
 
@@ -108,6 +109,14 @@ export default async function ClassesPage() {
                   </a>
                 </div>
               </div>
+
+              {/* Delete — 3-step confirmation, bottom left */}
+              <DeleteClassButton
+                classId={cls.id}
+                className={cls.name}
+                sessionCount={cls._count.sessions}
+                studentCount={cls._count.students}
+              />
             </div>
           )
         })}

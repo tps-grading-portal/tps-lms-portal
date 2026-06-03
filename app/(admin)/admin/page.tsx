@@ -1,6 +1,5 @@
 import { db } from '@/lib/db'
 import { headers } from 'next/headers'
-import { CreateClassForm } from './create-class-form'
 import { ClassTable } from './class-table'
 import { RosterPanel } from './roster-panel'
 import Link from 'next/link'
@@ -93,10 +92,21 @@ export default async function AdminPage() {
         </div>
       </section>
 
-      {/* Create Class */}
+      {/* Create Class — use the full wizard to ensure criteria are snapshotted correctly */}
       <section>
         <h2 className="text-lg font-semibold text-gray-800 mb-3">Create New Class</h2>
-        <CreateClassForm />
+        <div className="card border border-gray-200 max-w-lg flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium text-gray-800">Class Creation Wizard</p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Review criteria, scenarios, PINs, and surveys before creating.
+              Grading criteria are frozen at creation.
+            </p>
+          </div>
+          <Link href="/admin/classes/new" className="btn-primary text-sm flex-shrink-0">
+            Start Wizard →
+          </Link>
+        </div>
       </section>
 
       {/* Roster for active class */}
