@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useTransition } from 'react'
-import { chairEditGradeAction, finalizeSessionAction, deleteAssessmentAction } from './actions'
+import { chairEditGradeAction, finalizeSessionAction, deleteAssessmentAction, deleteEmptySessionAction } from './actions'
 import type { SessionDisplayData } from '@/lib/session-processor'
 import { cn, TRACK_LABELS } from '@/lib/utils'
 import { GRADE_LABELS } from '@/lib/constants'
@@ -187,8 +187,9 @@ export function SessionGrid({ initialData, classId }: SessionGridProps) {
   const [editTarget,   setEditTarget]   = useState<{
     criterionGradeId: string; currentValue: number; criterionCode: string; graderName: string
   } | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<{ assessmentId: string; graderName: string } | null>(null)
-  const [deleting,     setDeleting]     = useState(false)
+  const [deleteTarget,        setDeleteTarget]        = useState<{ assessmentId: string; graderName: string } | null>(null)
+  const [deleteSessionTarget, setDeleteSessionTarget] = useState<string | null>(null)
+  const [deleting,            setDeleting]            = useState(false)
   const [, startTransition] = useTransition()
   const eventSourceRef = useRef<EventSource | null>(null)
 
@@ -221,6 +222,15 @@ export function SessionGrid({ initialData, classId }: SessionGridProps) {
     if ('success' in result && result.success) startTransition(() => setData(result.data))
     setDeleting(false)
     setDeleteTarget(null)
+  }
+
+  const handleDeleteEmptySession = async () => {
+    if (!deleteSessionTarget) return
+    setDeleting(true)
+    const result = await deleteEmptySessionAction(deleteSessionTarget)
+    if ('success' in result && result.success) startTransition(() => setData(result.data))
+    setDeleting(false)
+    setDeleteSessionTarget(null)
   }
 
   const { sessions, criteria } = data
@@ -272,7 +282,16 @@ export function SessionGrid({ initialData, classId }: SessionGridProps) {
                 </div>
               </div>
               <div className="flex gap-2 items-start">
-                {isReady && (
+                {/* Empty session — no graders at all — offer to delete the card */}
+                {graders.length === 0 && (
+                  <button
+                    onClick={() => setDeleteSessionTarget(session.id)}
+                    className="text-xs py-2 px-3 rounded-lg font-semibold min-h-[44px] bg-red-100 text-red-700 hover:bg-red-200 border border-red-300"
+                  >
+                    Remove empty card
+                  </button>
+                )}
+                {isReady && graders.length > 0 && (
                   <button
                     onClick={async () => { await finalizeSessionAction(session.id) }}
                     className={cn('text-xs py-2 px-3 rounded-lg font-semibold min-h-[44px]',
@@ -391,6 +410,15 @@ export function SessionGrid({ initialData, classId }: SessionGridProps) {
               </table>
             </div>
 
+            {/* Empty card — no graders yet */}
+            {graders.length === 0 && (
+              <div className="px-4 py-6 text-center text-sm text-gray-400">
+                No grades submitted for this student yet.
+                <br />
+                <span className="text-xs">If this card was created in error, click <strong>Remove empty card</strong> above.</span>
+              </div>
+            )}
+
             {/* Row legend — only shown when splits exist */}
             {hasPending && (
               <div className="px-4 py-2 border-t border-amber-200 bg-amber-50 flex flex-wrap gap-4 text-xs text-gray-600">
@@ -428,6 +456,31 @@ export function SessionGrid({ initialData, classId }: SessionGridProps) {
           onClose={() => setDeleteTarget(null)}
           deleting={deleting}
         />
+      )}
+
+      {/* Delete empty session confirmation */}
+      {deleteSessionTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+             onClick={() => setDeleteSessionTarget(null)}>
+          <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl space-y-4"
+               onClick={(e) => e.stopPropagation()}>
+            <div>
+              <p className="font-semibold text-gray-800">Remove this empty grade card?</p>
+              <p className="text-sm text-gray-500 mt-1">
+                This session has no grader scores. Removing it will permanently delete the
+                card. The grader can resubmit with the correct student or scenario.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteSessionTarget(null)} className="btn-secondary flex-1 text-sm">
+                Cancel
+              </button>
+              <button onClick={handleDeleteEmptySession} disabled={deleting} className="btn-danger flex-1 text-sm">
+                {deleting ? 'Removing…' : 'Remove Card'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

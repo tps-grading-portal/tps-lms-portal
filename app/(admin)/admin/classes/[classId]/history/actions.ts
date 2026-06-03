@@ -76,6 +76,31 @@ export async function reopenSessionAction(
   return {}
 }
 
+// ── Admin: delete an empty session (zero grader assessments) ─────────────────
+
+export async function adminDeleteEmptySessionAction(
+  sessionId: string,
+  classId: string,
+): Promise<AdminEditGradeResult> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+
+  const record = await db.gradingSession.findUnique({
+    where:   { id: sessionId },
+    include: { _count: { select: { assessments: true } } },
+  })
+
+  if (!record)                           return { error: 'Session not found.' }
+  if (record.classId !== classId)        return { error: 'Unauthorized — wrong class.' }
+  if (record._count.assessments > 0)     return { error: 'Session still has grader scores — delete all grader columns first.' }
+
+  await db.gradingSession.delete({ where: { id: sessionId } })
+  revalidatePath(`/admin/classes/${classId}/history`)
+
+  const data = await getAdminSessionData(classId)
+  return { success: true, data }
+}
+
 // ── Admin inline grade edit (works on any status, including FINALIZED) ─────────
 
 export type AdminEditGradeResult =

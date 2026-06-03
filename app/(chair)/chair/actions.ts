@@ -33,6 +33,29 @@ export async function deleteAssessmentAction(
   return { success: true, data }
 }
 
+// ── Panel Chair: delete an empty session (zero grader assessments) ────────────
+
+export async function deleteEmptySessionAction(
+  sessionId: string,
+): Promise<EditGradeResult> {
+  const token = await validatePinToken('PANEL_CHAIR')
+  if (!token) return { error: 'Session expired. Please re-authenticate.' }
+
+  const session = await db.gradingSession.findUnique({
+    where:   { id: sessionId },
+    include: { _count: { select: { assessments: true } } },
+  })
+
+  if (!session)                                return { error: 'Session not found.' }
+  if (session.classId !== token.classId)       return { error: 'Unauthorized — wrong class.' }
+  if (session._count.assessments > 0)          return { error: 'Session still has grader scores — delete all grader columns first.' }
+
+  await db.gradingSession.delete({ where: { id: sessionId } })
+
+  const data = await getSessionDisplayData(token.classId)
+  return { success: true, data }
+}
+
 // ── Panel Chair: edit a grader's criterion score ──────────────────────────────
 
 const editGradeSchema = z.object({

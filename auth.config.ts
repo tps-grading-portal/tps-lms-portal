@@ -12,7 +12,22 @@ export const authConfig = {
   },
   session: {
     strategy: 'jwt',
-    maxAge: 8 * 60 * 60, // 8 hours
+    maxAge: 8 * 60 * 60, // JWT token validity — 8 hours
+  },
+  // Override the session cookie to be a session cookie (no maxAge).
+  // This means the browser discards it when the browser session ends
+  // (browser fully closed), requiring re-login on next visit.
+  // The JWT inside still carries the 8h expiry for security.
+  cookies: {
+    sessionToken: {
+      options: {
+        httpOnly: true,
+        sameSite: 'lax' as const,
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+        // No maxAge → browser session cookie
+      },
+    },
   },
   callbacks: {
     jwt({ token, user }) {
@@ -24,6 +39,5 @@ export const authConfig = {
       return session
     },
   },
-  // Providers are added in lib/auth.ts — not here (bcrypt is Node.js-only)
   providers: [],
 } satisfies NextAuthConfig

@@ -5,6 +5,7 @@ import {
   adminEditGradeAction,
   adminFinalizeSessionAction,
   reopenSessionAction,
+  adminDeleteEmptySessionAction,
   getAdminSessionData,
 } from './actions'
 import { cn, TRACK_LABELS } from '@/lib/utils'
@@ -163,6 +164,19 @@ export function AdminSessionGrid({ initialData, classId }: Props) {
     else setActionError(result.error)
   }
 
+  const [deleteEmptyTarget, setDeleteEmptyTarget] = useState<string | null>(null)
+  const [deletingEmpty,     setDeletingEmpty]     = useState(false)
+
+  const handleDeleteEmptySession = async () => {
+    if (!deleteEmptyTarget) return
+    setDeletingEmpty(true)
+    const result = await adminDeleteEmptySessionAction(deleteEmptyTarget, classId)
+    if ('success' in result) refresh(result.data)
+    else setActionError(result.error)
+    setDeletingEmpty(false)
+    setDeleteEmptyTarget(null)
+  }
+
   if (sessions.length === 0) {
     return (
       <div className="card text-center py-16 text-gray-400">
@@ -235,7 +249,16 @@ export function AdminSessionGrid({ initialData, classId }: Props) {
 
               {/* Action button */}
               <div className="flex gap-2 flex-shrink-0">
-                {isLocked && (
+                {/* Empty session — no grader assessments — offer to delete */}
+                {session.assessments.length === 0 && (
+                  <button
+                    onClick={() => setDeleteEmptyTarget(session.id)}
+                    className="text-sm py-2 px-3 rounded-lg font-semibold min-h-[44px] bg-red-100 text-red-700 hover:bg-red-200 border border-red-300"
+                  >
+                    Remove empty card
+                  </button>
+                )}
+                {isLocked && session.assessments.length > 0 && (
                   <button
                     onClick={() => handleReopen(session.id)}
                     className="btn-secondary text-sm border-amber-300 text-amber-700 hover:bg-amber-50"
@@ -394,6 +417,30 @@ export function AdminSessionGrid({ initialData, classId }: Props) {
           onSave={handleEdit}
           onClose={() => setEditTarget(null)}
         />
+      )}
+
+      {/* Delete empty session confirmation */}
+      {deleteEmptyTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+             onClick={() => setDeleteEmptyTarget(null)}>
+          <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl space-y-4"
+               onClick={(e) => e.stopPropagation()}>
+            <div>
+              <p className="font-semibold text-gray-800">Remove this empty grade card?</p>
+              <p className="text-sm text-gray-500 mt-1">
+                This session has no grader scores. Removing it will permanently delete the card.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteEmptyTarget(null)} className="btn-secondary flex-1 text-sm">
+                Cancel
+              </button>
+              <button onClick={handleDeleteEmptySession} disabled={deletingEmpty} className="btn-danger flex-1 text-sm">
+                {deletingEmpty ? 'Removing…' : 'Remove Card'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

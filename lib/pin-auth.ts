@@ -39,7 +39,8 @@ export async function issuePinToken(classId: string, role: AccessRole): Promise<
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 12 * 60 * 60, // 12 hours
+    // No maxAge — session cookie expires when browser closes.
+    // The JWT inside still carries a 12h expiry for security.
     path: '/',
   })
 
