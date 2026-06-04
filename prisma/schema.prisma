@@ -412,6 +412,141 @@ model SandboxQuestion {
   @@map("sandbox_questions")
 }
 
+// ============================================================
+// GRADEBOOK SYSTEM
+// ============================================================
+
+enum GradesheetType {
+  FLIGHT
+  REPORT
+  ORAL
+  SIM
+  CONTROL_ROOM
+}
+
+enum GradebookEntryStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+}
+
+// A gradebook class — separate from Comp Oral classes
+model GradebookClass {
+  id        String   @id @default(cuid())
+  name      String   @unique  // e.g. "Class 26A"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  students GradebookStudent[]
+
+  @@map("gradebook_classes")
+}
+
+// A student in a gradebook class
+model GradebookStudent {
+  id        String   @id @default(cuid())
+  classId   String
+  name      String   // real name or number identifier
+  track     Track    // reuses existing Track enum
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  class   GradebookClass   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  entries GradebookEntry[]
+
+  @@map("gradebook_students")
+}
+
+// A gradesheet template — the pool of reusable event definitions
+model GradesheetTemplate {
+  id            String         @id @default(cuid())
+  courseCode    String         // e.g. "PF 6121F"
+  title         String         // human-readable name
+  type          GradesheetType
+  tracks        Track[]        // which tracks this applies to
+  airmanshipPct Float          @default(0)  // fraction e.g. 0.20
+  bonusMaxPct   Float          @default(0)
+  isActive      Boolean        @default(true)
+  archivedAt    DateTime?
+  notes         String?        @db.Text
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  tasks   GradesheetTask[]
+  entries GradebookEntry[]
+
+  @@map("gradesheet_templates")
+}
+
+// A task (row) within a gradesheet template
+model GradesheetTask {
+  id             String  @id @default(cuid())
+  templateId     String
+  sortOrder      Int
+  sectionLabel   String?  // e.g. "Test Conduct", "Airmanship Tasks"
+  isAirmanship   Boolean  @default(false)
+  isBonus        Boolean  @default(false)
+  isDemo         Boolean  @default(false)  // NG/Demo — not scored
+  label          String
+  minScore       Int?     // 0-4; null for demo tasks
+  minScoreHard   Boolean  @default(false)  // asterisk (*) — auto-fail if below
+  desiredScore   Int?     // 0-4
+  weight         Float    @default(0)      // fraction e.g. 0.04
+  numberRequired Int      @default(1)
+
+  template GradesheetTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  scores   GradebookTaskScore[]
+
+  @@map("gradesheet_tasks")
+}
+
+// One instructor's completed gradesheet for one student
+model GradebookEntry {
+  id             String               @id @default(cuid())
+  studentId      String
+  templateId     String
+  status         GradebookEntryStatus @default(NOT_STARTED)
+  isLocked       Boolean              @default(false)
+  instructorName String?
+  submittedAt    DateTime?
+  overallScore   Float?   // weighted total, floored at 69 if any fail
+  academicPass   Boolean? // stoplight: no hard-min academic failure
+  airmanshipPass Boolean? // stoplight: no hard-min airmanship failure
+  overallPass    Boolean?
+  comments       String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  student  GradebookStudent   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  template GradesheetTemplate @relation(fields: [templateId], references: [id])
+  scores   GradebookTaskScore[]
+
+  @@unique([studentId, templateId])
+  @@map("gradebook_entries")
+}
+
+// Individual task scores within a gradesheet entry
+model GradebookTaskScore {
+  id                 String  @id @default(cuid())
+  entryId            String
+  taskId             String
+  scoreEntered       Int?    // 0-4
+  numberAccomplished Int?
+  scoreAwarded       Float?  // percentage from lookup table
+  isAutoFail         Boolean @default(false)
+  comments           String? @db.Text
+
+  entry GradebookEntry  @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  task  GradesheetTask  @relation(fields: [taskId], references: [id])
+
+  @@unique([entryId, taskId])
+  @@map("gradebook_task_scores")
+}
+
+// ============================================================
+// SANDBOX SUBMISSIONS
+// ============================================================
+
 // A single form submission
 model SandboxSubmission {
   id           String      @id @default(cuid())
