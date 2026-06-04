@@ -158,3 +158,101 @@ export async function archiveTemplateAction(templateId: string, archive: boolean
   revalidatePath('/admin/gradebook/templates')
   return { success: true }
 }
+
+// ── Duplicate a template ──────────────────────────────────────────────────────
+
+export async function duplicateTemplateAction(templateId: string) {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+
+  const source = await db.gradesheetTemplate.findUnique({
+    where:   { id: templateId },
+    include: { tasks: { orderBy: { sortOrder: 'asc' } } },
+  })
+  if (!source) return { error: 'Template not found.' }
+
+  const copy = await db.gradesheetTemplate.create({
+    data: {
+      courseCode:    source.courseCode + ' (copy)',
+      title:         source.title + ' (copy)',
+      type:          source.type,
+      tracks:        source.tracks,
+      airmanshipPct: source.airmanshipPct,
+      bonusMaxPct:   source.bonusMaxPct,
+      isActive:      true,
+      tasks: {
+        create: source.tasks.map((t) => ({
+          sortOrder:     t.sortOrder,
+          sectionLabel:  t.sectionLabel,
+          isAirmanship:  t.isAirmanship,
+          isBonus:       t.isBonus,
+          isDemo:        t.isDemo,
+          label:         t.label,
+          minScore:      t.minScore,
+          minScoreHard:  t.minScoreHard,
+          desiredScore:  t.desiredScore,
+          weight:        t.weight,
+          numberRequired: t.numberRequired,
+        })),
+      },
+    },
+  })
+
+  revalidatePath('/admin/gradebook/templates')
+  return { templateId: copy.id }
+}
+
+// ── Save (update) a template ──────────────────────────────────────────────────
+
+interface SaveTemplatePayload {
+  templateId:    string
+  courseCode:    string
+  title:         string
+  type:          string
+  tracks:        string[]
+  airmanshipPct: number
+  tasks: {
+    id?:           string
+    sortOrder:     number
+    label:         string
+    sectionLabel:  string | null
+    isAirmanship:  boolean
+    isBonus:       boolean
+    isDemo:        boolean
+    minScore:      number | null
+    minScoreHard:  boolean
+    desiredScore:  number | null
+    weight:        number
+    numberRequired: number
+  }[]
+}
+
+export async function saveTemplateAction(payload: SaveTemplatePayload): Promise<{ success: true } | { error: string }> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+
+  const { templateId, tasks, ...header } = payload
+
+  await db.gradesheetTemplate.update({
+    where: { id: templateId },
+    data: {
+      courseCode:    header.courseCode,
+      title:         header.title,
+      type:          header.type as never,
+      tracks:        header.tracks as never,
+      airmanshipPct: header.airmanshipPct,
+    },
+  })
+
+  // Replace all tasks
+  await db.gradesheetTask.deleteMany({ where: { templateId } })
+  if (tasks.length > 0) {
+    await db.gradesheetTask.createMany({
+      data: tasks.map((t) => ({ templateId, ...t, id: undefined })),
+    })
+  }
+
+  revalidatePath(`/admin/gradebook/templates/${templateId}`)
+  revalidatePath('/admin/gradebook/templates')
+  return { success: true }
+}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { archiveTemplateAction } from '../actions'
 import { cn } from '@/lib/utils'
 
@@ -70,13 +71,13 @@ export function TemplateLibraryPanel({ templates }: { templates: Template[] }) {
             {items.map((t) => (
               <div key={t.id} className={cn(
                 'flex items-center gap-4 rounded-xl border px-4 py-3',
-                !t.isActive ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-gray-200 bg-white'
+                !t.isActive ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-gray-200 bg-white hover:border-tps-orange transition-colors'
               )}>
                 <span className="text-lg flex-shrink-0">{TYPE_ICON[t.type] ?? '📋'}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm text-tps-navy">{t.courseCode}</p>
+                <Link href={`/admin/gradebook/templates/${t.id}`} className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm text-tps-navy hover:text-tps-orange">{t.courseCode}</p>
                   <p className="text-xs text-gray-500 truncate">{t.title}</p>
-                </div>
+                </Link>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <div className="flex gap-1">
                     {t.tracks.map((tr) => (
