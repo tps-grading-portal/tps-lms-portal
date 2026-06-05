@@ -1,32 +1,19 @@
 import { auth } from '@/lib/auth'
 import { signOut } from '@/lib/auth'
 import { TPSPatchBadge } from '@/components/ui/tps-branding'
-import { NavLink } from '@/components/ui/nav-link'
+import { AdminSidebar } from '@/components/ui/admin-sidebar'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: { template: '%s | Admin', default: 'Admin' } }
-
-const NAV_ITEMS = [
-  { href: '/admin',             label: 'Dashboard'  },
-  { href: '/admin/classes',     label: 'Classes'    },
-  { href: '/admin/classes/new', label: 'New Class'  },
-  { href: '/admin/rubric',      label: 'Rubric'     },
-  { href: '/admin/stats',       label: 'Statistics' },
-  { href: '/admin/surveys',     label: 'Surveys'    },
-  { href: '/admin/import',      label: 'Import'     },
-  { href: '/admin/settings',    label: 'Settings'   },
-  { href: '/admin/sandbox',     label: 'Sandbox'   },
-  { href: '/admin/gradebook',   label: 'Gradebook' },
-]
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   await auth()
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Top bar — 2px orange bottom border for crisp separation */}
-      <header className="bg-tps-navy text-white shadow-md border-b-2 border-tps-orange">
-        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+      {/* Top bar */}
+      <header className="bg-tps-navy text-white shadow-md border-b-2 border-tps-orange sticky top-0 z-50">
+        <div className="max-w-screen-2xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <TPSPatchBadge size={32} />
             <div>
@@ -51,18 +38,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         </div>
       </header>
 
-      {/* Section nav — NavLink handles active state with orange underline */}
-      <div className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4">
-          <nav className="flex gap-1 overflow-x-auto" aria-label="Admin sections">
-            {NAV_ITEMS.map((item) => (
-              <NavLink key={item.href} href={item.href} label={item.label} />
-            ))}
-          </nav>
-        </div>
-      </div>
+      <div className="flex">
+        {/* Left sidebar */}
+        <AdminSidebar />
 
-      <main className="max-w-7xl mx-auto px-4 py-6">{children}</main>
+        {/* Main content — offset by sidebar width on md+ */}
+        <main className="flex-1 md:ml-52 min-w-0 px-6 py-6 max-w-5xl">
+          {children}
+        </main>
+      </div>
     </div>
   )
 }
