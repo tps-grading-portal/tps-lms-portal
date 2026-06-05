@@ -49,10 +49,18 @@ export function GradebookClassPanel({ cls }: { cls: Cls }) {
             {fails > 0  && <><span>·</span><span className="text-red-600 font-medium">{fails} fail{fails !== 1 ? 's' : ''}</span></>}
           </div>
         </div>
-        <div className={cn('text-xs px-2 py-0.5 rounded-full font-medium',
-          cls.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-        )}>
-          {cls.isActive ? 'Active' : 'Inactive'}
+        <div className="flex items-center gap-2">
+          <div className={cn('text-xs px-2 py-0.5 rounded-full font-medium',
+            cls.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+          )}>
+            {cls.isActive ? 'Active' : 'Inactive'}
+          </div>
+          {hasEntries && (
+            <a href={`/api/gradebook/export/class/${cls.id}`}
+              className="btn-secondary text-xs">
+              Download All (ZIP)
+            </a>
+          )}
         </div>
       </div>
 

@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: 'Dashboard' }
 export default async function AdminPage() {
   const [classes, staffMembers, pendingSessions, totalFinalized] = await Promise.all([
     db.class.findMany({
-      orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ isCompOralCurrent: 'desc' }, { isActive: 'desc' }, { createdAt: 'desc' }],
       include: {
         _count: { select: { students: true, sessions: true } },
         students: { orderBy: { number: 'asc' }, select: { id: true, number: true, track: true } },
@@ -21,7 +21,7 @@ export default async function AdminPage() {
     db.gradingSession.count({ where: { status: 'FINALIZED' } }),
   ])
 
-  const activeClass = classes.find((c) => c.isActive)
+  const activeClass = classes.find((c) => c.isCompOralCurrent)
 
   const headersList = await headers()
   const host  = headersList.get('host') ?? 'localhost:3000'
@@ -35,22 +35,52 @@ export default async function AdminPage() {
     { label: 'Instructor Survey',  path: '/survey/instructor',  color: 'bg-amber-50  border-amber-200'  },
   ]
 
+  const activeClasses = classes.filter((c) => c.isActive)
+
   return (
     <div className="space-y-8">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-tps-navy">Dashboard</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          {activeClass ? `Active class: ${activeClass.name}` : 'No active class'}
+          {activeClasses.length} active class{activeClasses.length !== 1 ? 'es' : ''} ·{' '}
+          Comp Oral: <strong>{activeClass?.name ?? 'None selected'}</strong>
         </p>
       </div>
 
+      {/* Comp Oral class selector — shown when multiple active classes exist */}
+      {activeClasses.length > 1 && (
+        <div className="card border border-tps-orange bg-orange-50 space-y-2">
+          <p className="text-sm font-semibold text-tps-navy">Comp Oral — Current Class</p>
+          <p className="text-xs text-gray-600">
+            Select which class is being graded in today&apos;s Comp Oral exams. Sessions, grader access, and grade input will apply to this class.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {activeClasses.map((cls) => (
+              <form key={cls.id} action={async () => {
+                'use server'
+                const { setCompOralCurrentAction } = await import('./actions')
+                await setCompOralCurrentAction(cls.id)
+              }}>
+                <button type="submit"
+                  className={cls.isCompOralCurrent
+                    ? 'btn-primary text-sm'
+                    : 'btn-secondary text-sm'
+                  }>
+                  {cls.name}{cls.isCompOralCurrent ? ' (current)' : ''}
+                </button>
+              </form>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Active Class"           value={activeClass?.name ?? '—'}        color="blue"   />
-        <StatCard label="Open / In-Progress"     value={activeClass?._count?.sessions ?? 0} color="gray"  />
-        <StatCard label="Pending Discontinuities" value={pendingSessions}                   color="amber"  />
-        <StatCard label="Total Finalized"         value={totalFinalized}                   color="green"  />
+        <StatCard label="Comp Oral Class"         value={activeClass?.name ?? '—'}           color="blue"   />
+        <StatCard label="Open / In-Progress"      value={activeClass?._count?.sessions ?? 0}  color="gray"   />
+        <StatCard label="Pending Discontinuities" value={pendingSessions}                      color="amber"  />
+        <StatCard label="Total Finalized"         value={totalFinalized}                       color="green"  />
       </div>
 
       {/* QR Codes */}

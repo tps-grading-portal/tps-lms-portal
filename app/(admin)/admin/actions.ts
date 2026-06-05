@@ -50,11 +50,6 @@ export async function createClassAction(
     bcrypt.hash(chairPin, 12),
   ])
 
-  // If making this class active, deactivate all others first
-  if (makeActive === 'on') {
-    await db.class.updateMany({ where: { isActive: true }, data: { isActive: false } })
-  }
-
   const newClass = await db.class.create({
     data: {
       name,
@@ -79,17 +74,14 @@ export async function createClassAction(
   }
 }
 
-// ── Toggle Active Class ───────────────────────────────────────────────────────
+// ── Toggle Active Class (running/not running) — multiple can be active ────────
 
 export async function setActiveClassAction(classId: string): Promise<void> {
   const session = await auth()
   if (!session) throw new Error('Unauthorized')
 
-  await db.$transaction([
-    db.class.updateMany({ where: { isActive: true }, data: { isActive: false } }),
-    db.class.update({ where: { id: classId }, data: { isActive: true } }),
-  ])
-
+  // No longer deactivates other classes — multiple can be active simultaneously
+  await db.class.update({ where: { id: classId }, data: { isActive: true } })
   revalidatePath('/admin')
 }
 
@@ -99,6 +91,21 @@ export async function deactivateClassAction(classId: string): Promise<void> {
 
   await db.class.update({ where: { id: classId }, data: { isActive: false } })
   revalidatePath('/admin')
+}
+
+// ── Set Comp Oral current class — only one at a time ─────────────────────────
+
+export async function setCompOralCurrentAction(classId: string): Promise<void> {
+  const session = await auth()
+  if (!session) throw new Error('Unauthorized')
+
+  await db.$transaction([
+    db.class.updateMany({ where: { isCompOralCurrent: true }, data: { isCompOralCurrent: false } }),
+    db.class.update({ where: { id: classId }, data: { isCompOralCurrent: true } }),
+  ])
+
+  revalidatePath('/admin')
+  revalidatePath('/admin/classes')
 }
 
 // ── Rotate PIN ──────���─────────────────────────────────────────────────────────

@@ -89,6 +89,13 @@ export default async function StudentGradebookPage({ params }: PageProps) {
           pinIsSet={!!student.viewPinHash}
           isTempPin={student.isTempPin}
         />
+
+        <div className="flex justify-end pt-1">
+          <a href={`/api/gradebook/export/student/${student.id}`}
+            className="btn-secondary text-xs">
+            Download Gradebook (Excel)
+          </a>
+        </div>
       </div>
 
       {/* Event list */}

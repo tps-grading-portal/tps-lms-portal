@@ -29,11 +29,12 @@ model AdminUser {
 // ============================================================
 
 model Class {
-  id         String    @id @default(cuid())
-  name       String    @unique
-  isActive   Boolean   @default(false)
-  createdAt  DateTime  @default(now())
-  archivedAt DateTime?
+  id                String    @id @default(cuid())
+  name              String    @unique
+  isActive          Boolean   @default(false)   // class is running (multiple can be true)
+  isCompOralCurrent Boolean   @default(false)   // selected for Comp Oral grading (only one)
+  createdAt         DateTime  @default(now())
+  archivedAt        DateTime?
 
   access            ClassAccess[]
   students          Student[]

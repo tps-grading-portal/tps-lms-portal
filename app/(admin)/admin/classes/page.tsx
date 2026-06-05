@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: 'Classes' }
 
 export default async function ClassesPage() {
   const classes = await db.class.findMany({
-    orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+    orderBy: [{ isCompOralCurrent: 'desc' }, { isActive: 'desc' }, { createdAt: 'desc' }],
     include: {
       _count: { select: { students: true, sessions: true, studentSurveys: true } },
       sessions: {
