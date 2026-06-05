@@ -33,5 +33,5 @@ export default async function StudentGradebookPage({ params }: PageProps) {
 
   const label = studentLabel(student.class.name, student.number)
 
-  return <StudentGradebookView student={{ ...student, displayName: label }} />
+  return <StudentGradebookView token={token} student={{ ...student, displayName: label }} />
 }

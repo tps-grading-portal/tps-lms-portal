@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { cn } from '@/lib/utils'
 
 interface Entry {
@@ -13,6 +14,7 @@ interface Entry {
 }
 
 interface Props {
+  token: string
   student: {
     displayName: string
     track:       string
@@ -21,16 +23,14 @@ interface Props {
   }
 }
 
-const TYPE_ICON: Record<string, string> = {
-  FLIGHT: '✈', REPORT: '📄', ORAL: '🎤', SIM: '🖥', CONTROL_ROOM: '🎛',
-}
+
 const STATUS_STYLE: Record<string, string> = {
   NOT_STARTED: 'bg-gray-100 text-gray-500',
   IN_PROGRESS: 'bg-amber-100 text-amber-700',
   SUBMITTED:   'bg-green-100 text-green-700',
 }
 
-export function StudentGradebookView({ student }: Props) {
+export function StudentGradebookView({ token, student }: Props) {
   const submitted = student.entries.filter((e) => e.status === 'SUBMITTED').length
   const total     = student.entries.length
   const fails     = student.entries.filter((e) => e.overallPass === false).length
@@ -81,13 +81,14 @@ export function StudentGradebookView({ student }: Props) {
             <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400">{prefix}</h2>
             <div className="space-y-1">
               {entries.map((entry) => (
-                <div key={entry.id} className={cn(
-                  'flex items-center gap-4 rounded-xl border px-4 py-3',
-                  entry.overallPass === false ? 'border-red-300 bg-red-50' :
-                  entry.status === 'SUBMITTED' ? 'border-green-200 bg-green-50' :
-                  'border-gray-200 bg-white',
-                )}>
-                  <span className="text-lg flex-shrink-0">{TYPE_ICON[entry.template.type] ?? '📋'}</span>
+                <Link key={entry.id}
+                  href={`/gradebook/${token}/entry/${entry.id}`}
+                  className={cn(
+                    'flex items-center gap-4 rounded-xl border px-4 py-3 hover:border-tps-orange transition-colors',
+                    entry.overallPass === false ? 'border-red-300 bg-red-50' :
+                    entry.status === 'SUBMITTED' ? 'border-green-200 bg-green-50' :
+                    'border-gray-200 bg-white',
+                  )}>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm text-tps-navy">{entry.template.courseCode}</p>
                     <p className="text-xs text-gray-500 truncate">{entry.template.title}</p>
@@ -113,8 +114,9 @@ export function StudentGradebookView({ student }: Props) {
                     <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', STATUS_STYLE[entry.status])}>
                       {entry.status.replace('_', ' ')}
                     </span>
+                    <span className="text-gray-300">›</span>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           </div>
