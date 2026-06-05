@@ -102,7 +102,8 @@ export function scoreEntry(tasks: TaskScoreInput[]): EntryScoreResult {
   }
 
   // Renormalize if N/A tasks removed weight from the denominator
-  const rawScore = activeWeightSum > 0 ? (weightedSum / activeWeightSum) * 100 : 0
+  // scoreAwarded is 0-100 and weight is 0-1, so weightedSum is already in percentage points
+  const rawScore = activeWeightSum > 0 ? weightedSum / activeWeightSum : 0
 
   const academicPass   = !academicAutoFail
   const airmanshipPass = !airmanshipAutoFail

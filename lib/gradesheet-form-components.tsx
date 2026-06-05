@@ -63,55 +63,53 @@ export function TaskRow({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {!isNA && taskResult?.scoreAwarded !== undefined && (
-            <span className={cn('text-xs font-mono font-bold px-2 py-1 rounded',
-              taskResult.isAutoFail         ? 'bg-red-200 text-red-800' :
-              taskResult.scoreAwarded >= 90 ? 'bg-green-100 text-green-700' :
-              taskResult.scoreAwarded >= 70 ? 'bg-amber-100 text-amber-700' :
-              'bg-red-100 text-red-600'
-            )}>
-              {taskResult.scoreAwarded.toFixed(0)}%
-            </span>
-          )}
-          {isNA && <span className="text-xs text-gray-400 font-medium">N/A</span>}
-          {!task.isDemo && !locked && (
-            <button type="button"
-              onClick={() => onChange({ isNA: !isNA, scoreEntered: undefined })}
-              className={cn('text-xs px-2 py-1 rounded border font-medium transition-colors',
-                isNA
-                  ? 'border-tps-orange text-tps-orange bg-orange-50'
-                  : 'border-gray-200 text-gray-400 hover:border-gray-400'
-              )}>
-              N/A
-            </button>
-          )}
-        </div>
+        {/* Score awarded badge — in header row */}
+        {!isNA && taskResult?.scoreAwarded !== undefined && (
+          <span className={cn('text-xs font-mono font-bold px-2 py-1 rounded flex-shrink-0',
+            taskResult.isAutoFail         ? 'bg-red-200 text-red-800' :
+            taskResult.scoreAwarded >= 90 ? 'bg-green-100 text-green-700' :
+            taskResult.scoreAwarded >= 70 ? 'bg-amber-100 text-amber-700' :
+            'bg-red-100 text-red-600'
+          )}>
+            {taskResult.scoreAwarded.toFixed(0)}%
+          </span>
+        )}
+        {isNA && <span className="text-xs text-gray-400 font-medium flex-shrink-0">N/A</span>}
       </div>
 
       {!task.isDemo && !isNA && (
         <>
-          <div className="flex gap-2 items-center">
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <span className="text-[10px] text-gray-400 whitespace-nowrap">Acc:</span>
-              <input type="number" min={0} max={task.numberRequired * 2}
-                value={accomplished}
-                disabled={locked}
-                onChange={(e) => onChange({ numberAccomplished: parseInt(e.target.value) || 0 })}
-                className={cn('field-input w-12 text-center text-sm font-mono py-1.5',
-                  accomplished === 0 ? 'border-red-300 bg-red-50' : ''
-                )}
-              />
-              {task.numberRequired > 1 && (
-                <span className="text-[10px] text-gray-400">/{task.numberRequired}</span>
-              )}
+          {/* Column labels */}
+          <div className="flex gap-2 items-end mt-1">
+            <div className="w-14 flex-shrink-0">
+              <p className="text-[9px] text-gray-400 uppercase tracking-wide text-center">
+                {task.numberRequired > 1 ? `Acc/${task.numberRequired}` : 'Acc'}
+              </p>
             </div>
+            <div className="flex-1 flex gap-1">
+              {[0, 1, 2, 3, 4].map((v) => (
+                <span key={v} className="flex-1 text-[9px] text-gray-400 text-center">{v}</span>
+              ))}
+            </div>
+            {!locked && <div className="w-10 flex-shrink-0"><p className="text-[9px] text-gray-400 uppercase tracking-wide text-center">N/A</p></div>}
+          </div>
+
+          {/* Controls row */}
+          <div className="flex gap-2 items-center">
+            <input type="number" min={0} max={task.numberRequired * 2}
+              value={accomplished}
+              disabled={locked}
+              onChange={(e) => onChange({ numberAccomplished: parseInt(e.target.value) || 0 })}
+              className={cn('w-14 flex-shrink-0 field-input text-center text-sm font-mono py-1',
+                accomplished === 0 ? 'border-red-300 bg-red-50' : ''
+              )}
+            />
             <div className="flex gap-1 flex-1">
               {[0, 1, 2, 3, 4].map((v) => (
                 <button key={v} type="button"
                   disabled={locked}
                   onClick={() => onChange({ scoreEntered: v === score.scoreEntered ? undefined : v })}
-                  className={cn('flex-1 min-w-[32px] py-1.5 rounded-lg text-sm font-bold border transition-colors',
+                  className={cn('flex-1 py-1.5 rounded-lg text-xs font-bold border transition-colors',
                     score.scoreEntered === v
                       ? SCORE_COLORS[v] + ' border-transparent shadow-sm'
                       : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400 disabled:opacity-50'
@@ -120,13 +118,28 @@ export function TaskRow({
                 </button>
               ))}
             </div>
+            {/* N/A toggle — same row */}
+            {!locked && (
+              <button type="button"
+                onClick={() => onChange({ isNA: !isNA, scoreEntered: undefined })}
+                className={cn('w-10 py-1.5 rounded-lg text-xs font-bold border transition-colors flex-shrink-0',
+                  isNA
+                    ? 'border-tps-orange text-tps-orange bg-orange-50'
+                    : 'border-gray-200 text-gray-400 hover:border-gray-400'
+                )}>
+                N/A
+              </button>
+            )}
           </div>
-          {score.scoreEntered !== undefined && (
-            <p className="text-[10px] text-gray-500 pl-1">{SCORE_LABELS[score.scoreEntered]}</p>
+
+          {/* Score label + warnings */}
+          {score.scoreEntered !== undefined && !isNA && (
+            <p className="text-[10px] text-gray-500">{SCORE_LABELS[score.scoreEntered]}</p>
           )}
           {accomplished === 0 && task.minScoreHard && (
-            <p className="text-[10px] text-red-500 font-medium pl-1">⚠ 0 accomplished on a required task — auto-fail</p>
+            <p className="text-[10px] text-red-500 font-medium">⚠ 0 accomplished on a required task — auto-fail</p>
           )}
+
           {!locked && (
             <button type="button" onClick={() => setShowComment(!showComment)}
               className="text-[10px] text-gray-400 hover:text-gray-600">
