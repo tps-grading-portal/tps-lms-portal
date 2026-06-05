@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { auth } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { scoreEntry } from '@/lib/gradebook-scoring'
+import { hashPin } from '@/lib/sandbox-auth'
 import type { Track } from '@prisma/client'
 
 // ── Create class + students + auto-generate gradebook entries ────────────────
@@ -20,11 +21,12 @@ export async function createGradebookClassAction(formData: FormData) {
   try { students = JSON.parse(studentsRaw) } catch { return { error: 'Invalid student data.' } }
   if (students.length === 0) return { error: 'At least one student required.' }
 
-  // Fetch all active templates
   const templates = await db.gradesheetTemplate.findMany({
     where:  { isActive: true },
     select: { id: true, tracks: true },
   })
+
+  const { nanoid } = await import('nanoid')
 
   const cls = await db.gradebookClass.create({
     data: {
@@ -34,6 +36,7 @@ export async function createGradebookClassAction(formData: FormData) {
           name:      s.name,
           track:     s.track,
           sortOrder: i,
+          viewToken: nanoid(12),
           entries: {
             create: templates
               .filter((t) => t.tracks.includes(s.track))
@@ -53,11 +56,14 @@ export async function createGradebookClassAction(formData: FormData) {
 export async function saveGradebookEntryAction(
   entryId:       string,
   instructorName: string,
-  scores:        Record<string, { scoreEntered: number; numberAccomplished?: number; comments?: string }>,
+  scores:        Record<string, { scoreEntered?: number; numberAccomplished?: number; isNA?: boolean; comments?: string }>,
   submit:        boolean,
+  isInstructor?: boolean,
 ) {
-  const session = await auth()
-  if (!session) return { error: 'Unauthorized' }
+  if (!isInstructor) {
+    const session = await auth()
+    if (!session) return { error: 'Unauthorized' }
+  }
 
   const entry = await db.gradebookEntry.findUnique({
     where:   { id: entryId },
@@ -70,16 +76,18 @@ export async function saveGradebookEntryAction(
   const taskInputs = entry.template.tasks.map((t) => {
     const s = scores[t.id]
     return {
-      taskId:            t.id,
-      isAirmanship:      t.isAirmanship,
-      isBonus:           t.isBonus,
-      isDemo:            t.isDemo,
-      minScore:          t.minScore,
-      minScoreHard:      t.minScoreHard,
-      desiredScore:      t.desiredScore,
-      weight:            t.weight,
-      scoreEntered:      s?.scoreEntered ?? null,
+      taskId:             t.id,
+      isAirmanship:       t.isAirmanship,
+      isBonus:            t.isBonus,
+      isDemo:             t.isDemo,
+      isNA:               s?.isNA ?? false,
+      minScore:           t.minScore,
+      minScoreHard:       t.minScoreHard,
+      desiredScore:       t.desiredScore,
+      weight:             t.weight,
+      scoreEntered:       s?.scoreEntered ?? null,
       numberAccomplished: s?.numberAccomplished ?? null,
+      numberRequired:     t.numberRequired,
     }
   })
 
@@ -88,25 +96,27 @@ export async function saveGradebookEntryAction(
   // Upsert task scores
   for (const t of entry.template.tasks) {
     const s = scores[t.id]
-    if (!s) continue
+    if (!s && !scores[t.id]) continue
     const taskResult = result.taskResults.find((r) => r.taskId === t.id)
     await db.gradebookTaskScore.upsert({
       where:  { entryId_taskId: { entryId, taskId: t.id } },
       update: {
-        scoreEntered:       s.scoreEntered,
-        numberAccomplished: s.numberAccomplished ?? null,
+        scoreEntered:       s?.scoreEntered ?? null,
+        numberAccomplished: s?.numberAccomplished ?? 1,
+        isNA:               s?.isNA ?? false,
         scoreAwarded:       taskResult?.scoreAwarded ?? null,
         isAutoFail:         taskResult?.isAutoFail ?? false,
-        comments:           s.comments ?? null,
+        comments:           s?.comments ?? null,
       },
       create: {
         entryId,
         taskId:             t.id,
-        scoreEntered:       s.scoreEntered,
-        numberAccomplished: s.numberAccomplished ?? null,
+        scoreEntered:       s?.scoreEntered ?? null,
+        numberAccomplished: s?.numberAccomplished ?? 1,
+        isNA:               s?.isNA ?? false,
         scoreAwarded:       taskResult?.scoreAwarded ?? null,
         isAutoFail:         taskResult?.isAutoFail ?? false,
-        comments:           s.comments ?? null,
+        comments:           s?.comments ?? null,
       },
     })
   }
@@ -254,5 +264,70 @@ export async function saveTemplateAction(payload: SaveTemplatePayload): Promise<
 
   revalidatePath(`/admin/gradebook/templates/${templateId}`)
   revalidatePath('/admin/gradebook/templates')
+  return { success: true }
+}
+
+// ── Student PIN management ────────────────────────────────────────────────────
+
+function randPin() {
+  return Array.from({ length: 6 }, () => Math.floor(Math.random() * 10)).join('')
+}
+
+export async function resetStudentPinAction(studentId: string): Promise<{ tempPin: string } | { error: string }> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+
+  const tempPin = randPin()
+  const hash    = await hashPin(tempPin)
+
+  await db.gradebookStudent.update({
+    where: { id: studentId },
+    data:  { viewPinHash: hash, isTempPin: true },
+  })
+
+  revalidatePath('/admin/gradebook')
+  return { tempPin }
+}
+
+// ── Instructor management ─────────────────────────────────────────────────────
+
+export async function createInstructorAction(name: string, pin: string): Promise<{ success: true } | { error: string }> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+  if (!name.trim() || !pin.trim()) return { error: 'Name and PIN required.' }
+
+  const existing = await db.gradebookInstructor.findUnique({ where: { name: name.trim() } })
+  if (existing) return { error: 'Instructor with that name already exists.' }
+
+  await db.gradebookInstructor.create({
+    data: { name: name.trim(), pinHash: await hashPin(pin) },
+  })
+
+  revalidatePath('/admin/gradebook/instructors')
+  return { success: true }
+}
+
+export async function resetInstructorPinAction(instructorId: string, newPin: string): Promise<{ success: true } | { error: string }> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+
+  await db.gradebookInstructor.update({
+    where: { id: instructorId },
+    data:  { pinHash: await hashPin(newPin || randPin()) },
+  })
+
+  revalidatePath('/admin/gradebook/instructors')
+  return { success: true }
+}
+
+export async function toggleInstructorActiveAction(instructorId: string): Promise<{ success: true } | { error: string }> {
+  const session = await auth()
+  if (!session) return { error: 'Unauthorized' }
+
+  const inst = await db.gradebookInstructor.findUnique({ where: { id: instructorId } })
+  if (!inst) return { error: 'Not found.' }
+
+  await db.gradebookInstructor.update({ where: { id: instructorId }, data: { isActive: !inst.isActive } })
+  revalidatePath('/admin/gradebook/instructors')
   return { success: true }
 }

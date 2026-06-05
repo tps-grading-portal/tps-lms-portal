@@ -34,6 +34,9 @@ export default async function GradebookPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Link href="/admin/gradebook/instructors" className="btn-secondary text-sm">
+            Instructors
+          </Link>
           <Link href="/admin/gradebook/templates" className="btn-secondary text-sm">
             Gradesheet Library
           </Link>

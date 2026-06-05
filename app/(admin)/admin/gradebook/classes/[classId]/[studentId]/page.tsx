@@ -1,7 +1,9 @@
 import { db } from '@/lib/db'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
+import { headers } from 'next/headers'
 import { cn } from '@/lib/utils'
+import { StudentPinPanel } from './student-pin-panel'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Student Gradebook' }
@@ -9,9 +11,8 @@ export const metadata: Metadata = { title: 'Student Gradebook' }
 interface PageProps { params: Promise<{ classId: string; studentId: string }> }
 
 const TYPE_ICON: Record<string, string> = {
-  FLIGHT: '✈',  REPORT: '📄', ORAL: '🎤', SIM: '🖥', CONTROL_ROOM: '🎛',
+  FLIGHT: '✈', REPORT: '📄', ORAL: '🎤', SIM: '🖥', CONTROL_ROOM: '🎛',
 }
-
 const STATUS_STYLE: Record<string, string> = {
   NOT_STARTED: 'bg-gray-100 text-gray-500',
   IN_PROGRESS: 'bg-amber-100 text-amber-700',
@@ -26,21 +27,24 @@ export default async function StudentGradebookPage({ params }: PageProps) {
     include: {
       class: true,
       entries: {
-        include: {
-          template: { select: { courseCode: true, title: true, type: true } },
-        },
+        include: { template: { select: { courseCode: true, title: true, type: true } } },
         orderBy: { template: { courseCode: 'asc' } },
       },
     },
   })
   if (!student || student.classId !== classId) notFound()
 
+  const h       = await headers()
+  const host    = h.get('host') ?? 'localhost:3000'
+  const proto   = process.env.NODE_ENV === 'production' ? 'https' : 'http'
+  const baseUrl = `${proto}://${host}`
+  const studentUrl = student.viewToken ? `${baseUrl}/gradebook/${student.viewToken}` : null
+
   const totalEntries = student.entries.length
   const submitted    = student.entries.filter((e) => e.status === 'SUBMITTED').length
   const fails        = student.entries.filter((e) => e.overallPass === false).length
   const pct          = totalEntries > 0 ? Math.round((submitted / totalEntries) * 100) : 0
 
-  // Group by program prefix
   const grouped = student.entries.reduce<Record<string, typeof student.entries>>((acc, e) => {
     const prefix = e.template.courseCode.split(' ')[0]
     if (!acc[prefix]) acc[prefix] = []
@@ -58,8 +62,8 @@ export default async function StudentGradebookPage({ params }: PageProps) {
         <span className="text-gray-900 font-medium">{student.name}</span>
       </div>
 
-      {/* Header */}
-      <div className="card border border-gray-200">
+      {/* Student header + PIN panel */}
+      <div className="card border border-gray-200 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-tps-navy">{student.name}</h1>
@@ -74,20 +78,26 @@ export default async function StudentGradebookPage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* Progress bar */}
-        <div className="mt-4 h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
           <div className="h-full bg-tps-orange rounded-full transition-all" style={{ width: `${pct}%` }} />
         </div>
+
+        {/* Student gradebook link + PIN management */}
+        <StudentPinPanel
+          studentId={student.id}
+          studentUrl={studentUrl}
+          pinIsSet={!!student.viewPinHash}
+          isTempPin={student.isTempPin}
+        />
       </div>
 
-      {/* Grouped gradesheet list */}
+      {/* Event list */}
       {Object.entries(grouped).map(([prefix, entries]) => (
         <div key={prefix} className="space-y-2">
           <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400">{prefix}</h2>
           <div className="space-y-1">
             {entries.map((entry) => (
-              <Link
-                key={entry.id}
+              <Link key={entry.id}
                 href={`/admin/gradebook/classes/${classId}/${studentId}/${entry.id}`}
                 className={cn(
                   'flex items-center gap-4 rounded-xl border px-4 py-3 hover:border-tps-orange transition-colors',

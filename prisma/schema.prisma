@@ -444,17 +444,32 @@ model GradebookClass {
 
 // A student in a gradebook class
 model GradebookStudent {
-  id        String   @id @default(cuid())
-  classId   String
-  name      String   // real name or number identifier
-  track     Track    // reuses existing Track enum
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  classId     String
+  name        String
+  track       Track
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  // Student-facing gradebook access
+  viewToken   String?  @unique                    // public URL slug — set on creation
+  viewPinHash String?                             // null = never set
+  isTempPin   Boolean  @default(false)            // must change on next login
 
   class   GradebookClass   @relation(fields: [classId], references: [id], onDelete: Cascade)
   entries GradebookEntry[]
 
   @@map("gradebook_students")
+}
+
+// Instructor account
+model GradebookInstructor {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  pinHash   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("gradebook_instructors")
 }
 
 // A gradesheet template — the pool of reusable event definitions
@@ -531,8 +546,9 @@ model GradebookTaskScore {
   entryId            String
   taskId             String
   scoreEntered       Int?    // 0-4
-  numberAccomplished Int?
-  scoreAwarded       Float?  // percentage from lookup table
+  numberAccomplished Int?    // defaults to 1 if not set; 0 = not accomplished
+  isNA               Boolean @default(false)  // task marked N/A — excluded from scoring
+  scoreAwarded       Float?  // percentage from lookup table (post-proration)
   isAutoFail         Boolean @default(false)
   comments           String? @db.Text
 

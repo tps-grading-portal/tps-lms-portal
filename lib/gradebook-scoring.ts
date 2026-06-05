@@ -22,63 +22,95 @@ export function lookupScore(minScore: number, desiredScore: number, scoreEntered
 }
 
 export interface TaskScoreInput {
-  taskId:            string
-  isAirmanship:      boolean
-  isBonus:           boolean
-  isDemo:            boolean
-  minScore:          number | null
-  minScoreHard:      boolean
-  desiredScore:      number | null
-  weight:            number           // fraction 0-1
-  scoreEntered:      number | null
-  numberAccomplished?: number | null
+  taskId:             string
+  isAirmanship:       boolean
+  isBonus:            boolean
+  isDemo:             boolean
+  isNA:               boolean          // excluded from scoring entirely
+  minScore:           number | null
+  minScoreHard:       boolean
+  desiredScore:       number | null
+  weight:             number           // fraction 0-1
+  scoreEntered:       number | null
+  numberAccomplished: number | null    // null = treat as 1
+  numberRequired:     number           // from task definition
 }
 
 export interface TaskScoreResult {
-  taskId:      string
-  scoreAwarded: number   // percentage 0-100
-  isAutoFail:  boolean
+  taskId:       string
+  scoreAwarded: number   // percentage 0-100 (post-proration)
+  isAutoFail:   boolean
+  isNA:         boolean
 }
 
 export interface EntryScoreResult {
   overallScore:   number   // weighted total, floored at 69 if any fail
-  academicPass:   boolean  // no hard-min academic failure
-  airmanshipPass: boolean  // no hard-min airmanship failure
+  academicPass:   boolean
+  airmanshipPass: boolean
   overallPass:    boolean
   taskResults:    TaskScoreResult[]
 }
 
 export function scoreEntry(tasks: TaskScoreInput[]): EntryScoreResult {
-  let totalWeighted   = 0
+  let weightedSum        = 0
+  let activeWeightSum    = 0   // sum of weights for non-demo, non-NA tasks that have a score
   let academicAutoFail   = false
   let airmanshipAutoFail = false
   const taskResults: TaskScoreResult[] = []
 
   for (const t of tasks) {
-    if (t.isDemo || t.minScore === null || t.desiredScore === null) continue
+    // Skip demos entirely
+    if (t.isDemo) continue
+
+    // N/A tasks are excluded from scoring — don't add to weight sum
+    if (t.isNA) {
+      taskResults.push({ taskId: t.taskId, scoreAwarded: 0, isAutoFail: false, isNA: true })
+      continue
+    }
+
+    // Skip tasks with no score entered yet
     if (t.scoreEntered === null || t.scoreEntered === undefined) continue
+    if (t.minScore === null || t.desiredScore === null) continue
 
-    const pct       = lookupScore(t.minScore, t.desiredScore, t.scoreEntered)
-    const isBelowMin = t.scoreEntered < t.minScore
-    const isAutoFail = t.minScoreHard && isBelowMin
+    // Base lookup score
+    const basePct = lookupScore(t.minScore, t.desiredScore, t.scoreEntered)
 
-    totalWeighted += pct * t.weight
+    // # Accomplished proration
+    const accomplished = t.numberAccomplished ?? 1
+    const required     = Math.max(1, t.numberRequired)
+    const fraction     = Math.min(accomplished, required) / required
+
+    // 0 accomplished = 0 score (task was not attempted)
+    const scoreAwarded = accomplished === 0 ? 0 : basePct * fraction
+
+    // Auto-fail check:
+    // - Hard min AND score below min
+    // - OR hard min AND 0 accomplished (required task not attempted)
+    const belowMin   = t.scoreEntered < t.minScore
+    const notAttempted = accomplished === 0
+    const isAutoFail = t.minScoreHard && (belowMin || notAttempted)
+
+    weightedSum     += scoreAwarded * t.weight
+    activeWeightSum += t.weight
 
     if (isAutoFail) {
       if (t.isAirmanship) airmanshipAutoFail = true
       else academicAutoFail = true
     }
 
-    taskResults.push({ taskId: t.taskId, scoreAwarded: pct, isAutoFail })
+    taskResults.push({ taskId: t.taskId, scoreAwarded, isAutoFail, isNA: false })
   }
+
+  // Renormalize if N/A tasks removed weight from the denominator
+  const rawScore = activeWeightSum > 0 ? (weightedSum / activeWeightSum) * 100 : 0
 
   const academicPass   = !academicAutoFail
   const airmanshipPass = !airmanshipAutoFail
   const anyFail        = !academicPass || !airmanshipPass
-  const belowThreshold = totalWeighted < 69
+  const belowThreshold = rawScore < 69
 
   const overallPass  = !anyFail && !belowThreshold
-  const overallScore = overallPass ? totalWeighted : 69
+  const overallScore = overallPass ? rawScore : 69
 
   return { overallScore, academicPass, airmanshipPass, overallPass, taskResults }
 }
