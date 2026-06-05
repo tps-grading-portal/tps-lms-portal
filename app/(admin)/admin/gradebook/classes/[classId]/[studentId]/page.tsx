@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { headers } from 'next/headers'
 import { cn } from '@/lib/utils'
+import { studentLabel } from '@/lib/student-display'
 import { StudentPinPanel } from './student-pin-panel'
 import type { Metadata } from 'next'
 
@@ -22,7 +23,7 @@ const STATUS_STYLE: Record<string, string> = {
 export default async function StudentGradebookPage({ params }: PageProps) {
   const { classId, studentId } = await params
 
-  const student = await db.gradebookStudent.findUnique({
+  const student = await db.student.findUnique({
     where:   { id: studentId },
     include: {
       class: true,
@@ -40,6 +41,7 @@ export default async function StudentGradebookPage({ params }: PageProps) {
   const baseUrl = `${proto}://${host}`
   const studentUrl = student.viewToken ? `${baseUrl}/gradebook/${student.viewToken}` : null
 
+  const label        = studentLabel(student.class.name, student.number)
   const totalEntries = student.entries.length
   const submitted    = student.entries.filter((e) => e.status === 'SUBMITTED').length
   const fails        = student.entries.filter((e) => e.overallPass === false).length
@@ -59,14 +61,14 @@ export default async function StudentGradebookPage({ params }: PageProps) {
         <span>›</span>
         <Link href={`/admin/gradebook/classes/${classId}`} className="hover:text-tps-orange">{student.class.name}</Link>
         <span>›</span>
-        <span className="text-gray-900 font-medium">{student.name}</span>
+        <span className="text-gray-900 font-medium">{label}</span>
       </div>
 
-      {/* Student header + PIN panel */}
+      {/* Student header */}
       <div className="card border border-gray-200 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-tps-navy">{student.name}</h1>
+            <h1 className="text-2xl font-bold text-tps-navy">{label}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
               {student.track.replace('_', '/')} · {student.class.name}
             </p>
@@ -77,12 +79,10 @@ export default async function StudentGradebookPage({ params }: PageProps) {
             {fails > 0 && <p className="text-xs text-red-600 font-medium">{fails} fail{fails !== 1 ? 's' : ''}</p>}
           </div>
         </div>
-
         <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
           <div className="h-full bg-tps-orange rounded-full transition-all" style={{ width: `${pct}%` }} />
         </div>
 
-        {/* Student gradebook link + PIN management */}
         <StudentPinPanel
           studentId={student.id}
           studentUrl={studentUrl}
@@ -106,7 +106,9 @@ export default async function StudentGradebookPage({ params }: PageProps) {
                   'border-gray-200 bg-white',
                 )}
               >
-                <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium flex-shrink-0">{TYPE_LABEL[entry.template.type] ?? entry.template.type}</span>
+                <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium flex-shrink-0">
+                  {TYPE_LABEL[entry.template.type] ?? entry.template.type}
+                </span>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm text-tps-navy">{entry.template.courseCode}</p>
                   <p className="text-xs text-gray-500 truncate">{entry.template.title}</p>
@@ -139,6 +141,15 @@ export default async function StudentGradebookPage({ params }: PageProps) {
           </div>
         </div>
       ))}
+
+      {totalEntries === 0 && (
+        <div className="card border border-dashed border-gray-200 text-center py-8">
+          <p className="text-sm text-gray-400">No gradesheet entries yet.</p>
+          <p className="text-xs text-gray-400 mt-1">
+            Go to the <Link href="/admin/gradebook" className="text-tps-orange hover:underline">Gradebook overview</Link> and click Set Up Gradebook for this class.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

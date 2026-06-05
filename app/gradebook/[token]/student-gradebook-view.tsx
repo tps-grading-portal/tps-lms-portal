@@ -14,10 +14,10 @@ interface Entry {
 
 interface Props {
   student: {
-    name:    string
-    track:   string
-    entries: Entry[]
-    class:   { name: string }
+    displayName: string
+    track:       string
+    entries:     Entry[]
+    class:       { name: string }
   }
 }
 
@@ -61,7 +61,7 @@ export function StudentGradebookView({ student }: Props) {
         <div className="card border border-gray-200 space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold text-tps-navy">{student.name}</h1>
+              <h1 className="text-xl font-bold text-tps-navy">{student.displayName}</h1>
               <p className="text-sm text-gray-500">{student.track.replace('_', '/')} · {student.class.name}</p>
             </div>
             <div className="text-right">

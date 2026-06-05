@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { notFound, redirect } from 'next/navigation'
 import { getStudentSession } from '@/lib/gradebook-auth'
 import { StudentGradebookView } from './student-gradebook-view'
+import { studentLabel } from '@/lib/student-display'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'My Gradebook' }
@@ -11,7 +12,7 @@ interface PageProps { params: Promise<{ token: string }> }
 export default async function StudentGradebookPage({ params }: PageProps) {
   const { token } = await params
 
-  const student = await db.gradebookStudent.findUnique({
+  const student = await db.student.findUnique({
     where:   { viewToken: token },
     include: {
       class: { select: { name: true } },
@@ -23,21 +24,14 @@ export default async function StudentGradebookPage({ params }: PageProps) {
   })
   if (!student) notFound()
 
-  // Must have a PIN set before we check session
-  if (!student.viewPinHash) {
-    redirect(`/gradebook/${token}/set-pin`)
-  }
+  if (!student.viewPinHash) redirect(`/gradebook/${token}/set-pin`)
 
-  // Check session
   const session = await getStudentSession(token)
-  if (!session || session.studentId !== student.id) {
-    redirect(`/gradebook/${token}/auth`)
-  }
+  if (!session || session.studentId !== student.id) redirect(`/gradebook/${token}/auth`)
 
-  // If temp PIN, must change it
-  if (student.isTempPin) {
-    redirect(`/gradebook/${token}/set-pin?change=1`)
-  }
+  if (student.isTempPin) redirect(`/gradebook/${token}/set-pin?change=1`)
 
-  return <StudentGradebookView student={student} />
+  const label = studentLabel(student.class.name, student.number)
+
+  return <StudentGradebookView student={{ ...student, displayName: label }} />
 }

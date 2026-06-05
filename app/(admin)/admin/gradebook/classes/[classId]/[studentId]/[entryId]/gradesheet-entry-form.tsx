@@ -9,7 +9,7 @@ import { TaskRow, type TaskScore } from '@/lib/gradesheet-form-components'
 import type { GradesheetTemplate, GradesheetTask, GradebookEntry, GradebookTaskScore } from '@prisma/client'
 
 type FullEntry = GradebookEntry & {
-  student:  { id: string; name: string; track: string; class: { name: string } }
+  student:  { id: string; number: number; track: string; class: { name: string } }
   template: GradesheetTemplate & { tasks: GradesheetTask[] }
   scores:   GradebookTaskScore[]
 }
@@ -118,7 +118,7 @@ export function GradesheetEntryForm({ entry, isInstructor }: { entry: FullEntry;
               {entry.template.courseCode} — {entry.template.title}
             </h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              {entry.student.name} · {entry.student.track.replace('_', '/')} · {entry.student.class.name}
+              {entry.student.class.name}-{entry.student.number} · {entry.student.track.replace('_', '/')} · {entry.student.class.name}
             </p>
           </div>
           {isLocked && !isInstructor && (

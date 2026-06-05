@@ -3,6 +3,7 @@ import { getInstructorSession } from '@/lib/gradebook-auth'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import { studentLabel } from '@/lib/student-display'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Instructor Gradebook' }
@@ -11,12 +12,12 @@ export default async function InstructorGradebookPage() {
   const session = await getInstructorSession()
   if (!session) redirect('/instructor/auth')
 
-  const classes = await db.gradebookClass.findMany({
+  const classes = await db.class.findMany({
     where:   { isActive: true },
     orderBy: { createdAt: 'desc' },
     include: {
       students: {
-        orderBy: { sortOrder: 'asc' },
+        orderBy: { number: 'asc' },
         include: {
           entries: { select: { status: true, overallPass: true } },
         },
@@ -60,10 +61,10 @@ export default async function InstructorGradebookPage() {
                       hasFail ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-white',
                     )}
                   >
-                    <p className="font-semibold text-sm text-tps-navy truncate">{student.name}</p>
+                    <p className="font-semibold text-sm text-tps-navy">{studentLabel(cls.name, student.number)}</p>
                     <p className="text-[10px] text-gray-400 uppercase tracking-wide">{student.track.replace('_', '/')}</p>
-                    <p className={cn('text-xs mt-1 font-medium', done === total ? 'text-green-600' : 'text-gray-500')}>
-                      {done}/{total} done {hasFail && '⚠'}
+                    <p className={cn('text-xs mt-1 font-medium', done === total && total > 0 ? 'text-green-600' : 'text-gray-500')}>
+                      {total === 0 ? 'No entries' : `${done}/${total} done`}{hasFail ? ' !' : ''}
                     </p>
                   </Link>
                 )

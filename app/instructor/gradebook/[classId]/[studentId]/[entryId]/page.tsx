@@ -35,7 +35,7 @@ export default async function InstructorEntryPage({ params }: PageProps) {
     <main className="min-h-screen bg-gray-50 pb-16">
       <header className="bg-tps-navy text-white px-4 h-14 flex items-center justify-between border-b-2 border-tps-orange sticky top-0 z-10">
         <Link href={`/instructor/gradebook/${classId}/${studentId}`} className="text-sm text-gray-300 hover:text-white">
-          ← {entry.student.name}
+          ← {entry.student.class.name}-{entry.student.number}
         </Link>
         <span className="text-xs text-gray-300">{session.name}</span>
       </header>
@@ -44,7 +44,7 @@ export default async function InstructorEntryPage({ params }: PageProps) {
         <div className="flex items-center gap-2 text-sm text-gray-500">
           <Link href="/instructor/gradebook" className="hover:text-tps-orange">Gradebook</Link>
           <span>›</span>
-          <Link href={`/instructor/gradebook/${classId}/${studentId}`} className="hover:text-tps-orange">{entry.student.name}</Link>
+          <Link href={`/instructor/gradebook/${classId}/${studentId}`} className="hover:text-tps-orange">{entry.student.class.name}-{entry.student.number}</Link>
           <span>›</span>
           <span className="text-gray-900 font-medium">{entry.template.courseCode}</span>
         </div>

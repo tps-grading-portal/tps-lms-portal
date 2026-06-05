@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { getInstructorSession } from '@/lib/gradebook-auth'
+import { studentLabel } from '@/lib/student-display'
 import { cn } from '@/lib/utils'
 import type { Metadata } from 'next'
 
@@ -22,7 +23,7 @@ export default async function InstructorStudentPage({ params }: PageProps) {
 
   const { classId, studentId } = await params
 
-  const student = await db.gradebookStudent.findUnique({
+  const student = await db.student.findUnique({
     where:   { id: studentId },
     include: {
       class: true,
@@ -34,6 +35,7 @@ export default async function InstructorStudentPage({ params }: PageProps) {
   })
   if (!student || student.classId !== classId) notFound()
 
+  const label     = studentLabel(student.class.name, student.number)
   const submitted = student.entries.filter((e) => e.status === 'SUBMITTED').length
   const total     = student.entries.length
   const pct       = total > 0 ? Math.round((submitted / total) * 100) : 0
@@ -48,11 +50,9 @@ export default async function InstructorStudentPage({ params }: PageProps) {
   return (
     <main className="min-h-screen bg-gray-50 pb-16">
       <header className="bg-tps-navy text-white px-4 h-14 flex items-center justify-between border-b-2 border-tps-orange sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-          <Link href="/instructor/gradebook" className="text-gray-300 hover:text-white text-sm">← Classes</Link>
-          <span className="text-gray-500">·</span>
-          <span className="text-white text-sm font-medium">{student.name}</span>
-        </div>
+        <Link href={`/instructor/gradebook/${classId}`} className="text-sm text-gray-300 hover:text-white">
+          ← {student.class.name}
+        </Link>
         <span className="text-xs text-gray-300">{session.name}</span>
       </header>
 
@@ -60,7 +60,7 @@ export default async function InstructorStudentPage({ params }: PageProps) {
         <div className="card border border-gray-200 space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold text-tps-navy">{student.name}</h1>
+              <h1 className="text-xl font-bold text-tps-navy">{label}</h1>
               <p className="text-sm text-gray-500">{student.track.replace('_', '/')} · {student.class.name}</p>
             </div>
             <div className="text-right">
@@ -86,7 +86,9 @@ export default async function InstructorStudentPage({ params }: PageProps) {
                     entry.status === 'SUBMITTED' ? 'border-green-200 bg-green-50' :
                     'border-gray-200 bg-white',
                   )}>
-                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium flex-shrink-0">{TYPE_LABEL[entry.template.type] ?? entry.template.type}</span>
+                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium flex-shrink-0">
+                    {TYPE_LABEL[entry.template.type] ?? entry.template.type}
+                  </span>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm text-tps-navy">{entry.template.courseCode}</p>
                     <p className="text-xs text-gray-500 truncate">{entry.template.title}</p>

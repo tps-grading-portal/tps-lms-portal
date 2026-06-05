@@ -28,7 +28,7 @@ export default async function GradesheetEntryPage({ params }: PageProps) {
         <span>›</span>
         <Link href={`/admin/gradebook/classes/${classId}`} className="hover:text-tps-orange">{entry.student.class.name}</Link>
         <span>›</span>
-        <Link href={`/admin/gradebook/classes/${classId}/${studentId}`} className="hover:text-tps-orange">{entry.student.name}</Link>
+        <Link href={`/admin/gradebook/classes/${classId}/${studentId}`} className="hover:text-tps-orange">{entry.student.class.name}-{entry.student.number}</Link>
         <span>›</span>
         <span className="text-gray-900 font-medium">{entry.template.courseCode}</span>
       </div>

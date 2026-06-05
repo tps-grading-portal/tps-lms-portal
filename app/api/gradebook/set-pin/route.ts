@@ -5,10 +5,9 @@ import { verifyPin, hashPin, setStudentSession } from '@/lib/gradebook-auth'
 export async function POST(req: Request) {
   const { token, pin, tempPin } = await req.json() as { token: string; pin: string; tempPin?: string }
 
-  const student = await db.gradebookStudent.findUnique({ where: { viewToken: token } })
+  const student = await db.student.findUnique({ where: { viewToken: token } })
   if (!student) return NextResponse.json({ error: 'Invalid link.' }, { status: 400 })
 
-  // If changing PIN (temp PIN flow), verify the temp PIN first
   if (student.isTempPin && student.viewPinHash) {
     if (!tempPin) return NextResponse.json({ error: 'Temporary PIN required.' }, { status: 400 })
     const ok = await verifyPin(tempPin, student.viewPinHash)
@@ -18,7 +17,7 @@ export async function POST(req: Request) {
   if (pin.length < 4) return NextResponse.json({ error: 'PIN must be at least 4 characters.' }, { status: 400 })
 
   const newHash = await hashPin(pin)
-  await db.gradebookStudent.update({
+  await db.student.update({
     where: { id: student.id },
     data:  { viewPinHash: newHash, isTempPin: false },
   })

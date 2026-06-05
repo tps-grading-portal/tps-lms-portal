@@ -5,7 +5,7 @@ import { verifyPin, setStudentSession } from '@/lib/gradebook-auth'
 export async function POST(req: Request) {
   const { token, pin } = await req.json() as { token: string; pin: string }
 
-  const student = await db.gradebookStudent.findUnique({ where: { viewToken: token } })
+  const student = await db.student.findUnique({ where: { viewToken: token } })
   if (!student || !student.viewPinHash) {
     return NextResponse.json({ error: 'No PIN set — contact your instructor.' }, { status: 400 })
   }

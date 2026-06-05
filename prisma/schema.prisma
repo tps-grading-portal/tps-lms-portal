@@ -135,14 +135,19 @@ enum Pillar {
 // ============================================================
 
 model Student {
-  id        String   @id @default(cuid())
-  classId   String
-  number    Int      // integer part, e.g. 1, 2, 3 … N
-  track     Track
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  classId     String
+  number      Int      // integer part, e.g. 1, 2, 3 … N
+  track       Track
+  createdAt   DateTime @default(now())
+  // Gradebook / student portal fields
+  viewToken   String?  @unique  // public URL slug for student-facing gradebook
+  viewPinHash String?           // null = never set
+  isTempPin   Boolean  @default(false)
 
   class    Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
   sessions GradingSession[]
+  entries  GradebookEntry[]
 
   @@unique([classId, number])
   @@map("students")
@@ -430,37 +435,6 @@ enum GradebookEntryStatus {
   SUBMITTED
 }
 
-// A gradebook class — separate from Comp Oral classes
-model GradebookClass {
-  id        String   @id @default(cuid())
-  name      String   @unique  // e.g. "Class 26A"
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-
-  students GradebookStudent[]
-
-  @@map("gradebook_classes")
-}
-
-// A student in a gradebook class
-model GradebookStudent {
-  id          String   @id @default(cuid())
-  classId     String
-  name        String
-  track       Track
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  // Student-facing gradebook access
-  viewToken   String?  @unique                    // public URL slug — set on creation
-  viewPinHash String?                             // null = never set
-  isTempPin   Boolean  @default(false)            // must change on next login
-
-  class   GradebookClass   @relation(fields: [classId], references: [id], onDelete: Cascade)
-  entries GradebookEntry[]
-
-  @@map("gradebook_students")
-}
-
 // Instructor account
 model GradebookInstructor {
   id        String   @id @default(cuid())
@@ -532,7 +506,7 @@ model GradebookEntry {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  student  GradebookStudent   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student  Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
   template GradesheetTemplate @relation(fields: [templateId], references: [id])
   scores   GradebookTaskScore[]
 

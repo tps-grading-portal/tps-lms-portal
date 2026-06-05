@@ -5,21 +5,18 @@ import { auth } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { scoreEntry } from '@/lib/gradebook-scoring'
 import { hashPin } from '@/lib/sandbox-auth'
-import type { Track } from '@prisma/client'
 
-// ── Create class + students + auto-generate gradebook entries ────────────────
+// ── Generate gradebook entries for an existing Comp Oral class ───────────────
 
-export async function createGradebookClassAction(formData: FormData) {
+export async function setupGradebookForClassAction(classId: string) {
   const session = await auth()
   if (!session) return { error: 'Unauthorized' }
 
-  const name = formData.get('name')?.toString()?.trim()
-  if (!name) return { error: 'Class name required.' }
-
-  const studentsRaw = formData.get('students')?.toString() ?? '[]'
-  let students: { name: string; track: Track }[] = []
-  try { students = JSON.parse(studentsRaw) } catch { return { error: 'Invalid student data.' } }
-  if (students.length === 0) return { error: 'At least one student required.' }
+  const cls = await db.class.findUnique({
+    where:   { id: classId },
+    include: { students: true },
+  })
+  if (!cls) return { error: 'Class not found.' }
 
   const templates = await db.gradesheetTemplate.findMany({
     where:  { isActive: true },
@@ -28,27 +25,29 @@ export async function createGradebookClassAction(formData: FormData) {
 
   const { nanoid } = await import('nanoid')
 
-  const cls = await db.gradebookClass.create({
-    data: {
-      name,
-      students: {
-        create: students.map((s, i) => ({
-          name:      s.name,
-          track:     s.track,
-          sortOrder: i,
-          viewToken: nanoid(12),
-          entries: {
-            create: templates
-              .filter((t) => t.tracks.includes(s.track))
-              .map((t) => ({ templateId: t.id })),
-          },
-        })),
-      },
-    },
-  })
+  // Generate entries for each student, assign view token if not set
+  for (const student of cls.students) {
+    // Assign viewToken on first gradebook setup
+    if (!student.viewToken) {
+      await db.student.update({
+        where: { id: student.id },
+        data:  { viewToken: nanoid(12) },
+      })
+    }
+
+    // Create entries for matching templates (skip if entry already exists)
+    const matchingTemplates = templates.filter((t) => t.tracks.includes(student.track))
+    for (const tmpl of matchingTemplates) {
+      await db.gradebookEntry.upsert({
+        where:  { studentId_templateId: { studentId: student.id, templateId: tmpl.id } },
+        update: {},
+        create: { studentId: student.id, templateId: tmpl.id },
+      })
+    }
+  }
 
   revalidatePath('/admin/gradebook')
-  return { classId: cls.id }
+  return { classId }
 }
 
 // ── Save gradesheet entry (instructor submits scores) ────────────────────────
@@ -280,7 +279,7 @@ export async function resetStudentPinAction(studentId: string): Promise<{ tempPi
   const tempPin = randPin()
   const hash    = await hashPin(tempPin)
 
-  await db.gradebookStudent.update({
+  await db.student.update({
     where: { id: studentId },
     data:  { viewPinHash: hash, isTempPin: true },
   })
