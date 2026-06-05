@@ -132,7 +132,7 @@ export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
                     onClick={() => { setPinPanelId(pinPanelId === invite.id ? null : invite.id); setPinResult(null); setPinInput('') }}
                     className="btn-secondary text-xs"
                   >
-                    🔑 Reset PIN
+                    Reset PIN
                   </button>
                   <button
                     onClick={() => setConfirmId(invite.id)}
@@ -239,11 +239,11 @@ export function SandboxAdminPanel({ invites, standaloneForms }: Props) {
                     onClick={() => { setPinPanelId(pinPanelId === form.id ? null : form.id); setPinResult(null); setPinInput('') }}
                     className="btn-secondary text-xs"
                   >
-                    🔑 Reset PIN
+                    Reset PIN
                   </button>
                   <button onClick={() => handleDuplicate(form.id, form.title)} disabled={duplicating === form.id}
                     className="btn-secondary text-xs">
-                    {duplicating === form.id ? '…' : '⎘ Duplicate'}
+                    {duplicating === form.id ? '…' : 'Duplicate'}
                   </button>
                   <button onClick={() => setConfirmId(form.id)} className="text-xs text-red-400 hover:text-red-600 min-h-[32px] px-2">
                     Delete
@@ -328,7 +328,7 @@ function PinResetPanel({
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-gray-700">🔑 Reset Access PIN</p>
+        <p className="text-sm font-semibold text-gray-700">Reset Access PIN</p>
         <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">✕ Close</button>
       </div>
       <input
@@ -374,7 +374,7 @@ function InvitePinResetPanel({
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-gray-700">🔑 Reset Access PIN</p>
+        <p className="text-sm font-semibold text-gray-700">Reset Access PIN</p>
         <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">✕ Close</button>
       </div>
       <input

@@ -423,8 +423,9 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
                 {form.mode === 'GRADER' && <th className="px-3 py-2 text-left font-semibold text-gray-600">Subject</th>}
                 <th className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Grader / Respondent</th>
                 {questions.map((q, qi) => (
-                  <th key={q.id} className="px-3 py-2 text-left font-semibold text-gray-600 min-w-[60px]">
-                    <span title={q.label} className="cursor-help font-mono">{qLabel(qi)}</span>
+                  <th key={q.id} title={q.label || q.sectionLabel || `Question ${qi + 1}`}
+                      className="px-3 py-2 text-left font-semibold text-gray-600 min-w-[60px] cursor-help">
+                    <span className="font-mono">{qLabel(qi)}</span>
                   </th>
                 ))}
                 {form.scoringEnabled && <th className="px-3 py-2 text-left font-semibold text-gray-600">Score</th>}
@@ -439,13 +440,23 @@ export function SandboxResultsViewer({ form, questions, initialSubmissions, slug
                   <td className="px-3 py-2 text-gray-500">{s.graderName ?? '—'}</td>
                   {questions.map((q) => {
                     const val = s.answers[q.id]
-                    const display = val === undefined || val === null || val === ''
-                      ? <span className="text-gray-300">—</span>
-                      : q.questionType === 'GRADE_1_8'
-                        ? <span className={cn('font-bold', parseInt(String(val)) === 8 ? 'text-red-600' : parseInt(String(val)) <= 2 ? 'text-green-600' : 'text-gray-700')}>{String(val)}</span>
-                        : q.questionType === 'TEXT'
-                          ? <span className="text-gray-600 truncate max-w-[120px] block" title={String(val)}>{String(val).slice(0, 40)}{String(val).length > 40 ? '…' : ''}</span>
-                          : Array.isArray(val) ? <span>{val.join(', ')}</span> : <span>{String(val)}</span>
+                    let display: React.ReactNode
+                    if (val === undefined || val === null || val === '') {
+                      display = <span className="text-gray-300">—</span>
+                    } else if (q.questionType === 'REPEATING_SECTION') {
+                      try {
+                        const entries = parseRepeatEntries(val)
+                        display = <span className="text-gray-500 italic">{entries.length > 0 ? `${entries.length} person${entries.length !== 1 ? 's' : ''} graded` : '—'}</span>
+                      } catch { display = <span className="text-gray-300">—</span> }
+                    } else if (q.questionType === 'GRADE_1_8') {
+                      display = <span className={cn('font-bold', parseInt(String(val)) === 8 ? 'text-red-600' : parseInt(String(val)) <= 2 ? 'text-green-600' : 'text-gray-700')}>{String(val)}</span>
+                    } else if (q.questionType === 'TEXT') {
+                      display = <span className="text-gray-600 truncate max-w-[120px] block" title={String(val)}>{String(val).slice(0, 40)}{String(val).length > 40 ? '…' : ''}</span>
+                    } else if (Array.isArray(val)) {
+                      display = <span>{val.join(', ')}</span>
+                    } else {
+                      display = <span>{String(val)}</span>
+                    }
                     return <td key={q.id} className="px-3 py-2 text-gray-700">{display}</td>
                   })}
                   {form.scoringEnabled && (

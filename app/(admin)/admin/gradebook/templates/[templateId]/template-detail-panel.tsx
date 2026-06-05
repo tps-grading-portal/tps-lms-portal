@@ -15,7 +15,7 @@ const TRACK_SHORT: Record<string, string> = {
 }
 
 const TYPE_LABEL: Record<string, string> = {
-  FLIGHT: '✈ Flight', REPORT: '📄 Report', ORAL: '🎤 Oral', SIM: '🖥 Sim', CONTROL_ROOM: '🎛 Control Room',
+  FLIGHT: 'Flight', REPORT: 'Report', ORAL: 'Oral', SIM: 'Sim', CONTROL_ROOM: 'Control Room',
 }
 
 type Tab = 'view' | 'preview' | 'edit'
@@ -73,7 +73,7 @@ export function TemplateDetailPanel({
             </div>
           </div>
           <button onClick={handleDuplicate} disabled={duplicating} className="btn-secondary text-sm flex-shrink-0">
-            {duplicating ? '…' : '⎘ Duplicate'}
+            {duplicating ? '…' : 'Duplicate'}
           </button>
         </div>
       </div>
@@ -87,7 +87,7 @@ export function TemplateDetailPanel({
                 ? 'border-tps-orange text-tps-orange'
                 : 'border-transparent text-gray-500 hover:text-gray-800'
             )}>
-            {t === 'view' ? '📋 Tasks' : t === 'preview' ? '▶ Preview' : '✏ Edit'}
+            {t === 'view' ? 'Tasks' : t === 'preview' ? 'Preview' : 'Edit'}
           </button>
         ))}
       </div>
@@ -100,7 +100,7 @@ export function TemplateDetailPanel({
               <div className={cn('px-4 py-2 text-xs font-bold uppercase tracking-wide',
                 tasks[0]?.isAirmanship ? 'bg-orange-50 text-tps-orange' : 'bg-gray-50 text-gray-500'
               )}>
-                {tasks[0]?.isAirmanship ? '✈ ' : ''}{section}
+                {section}
               </div>
               <table className="w-full text-sm">
                 <thead>

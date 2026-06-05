@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: 'Student Gradebook' }
 
 interface PageProps { params: Promise<{ classId: string; studentId: string }> }
 
-const TYPE_ICON: Record<string, string> = { FLIGHT: '✈', REPORT: '📄', ORAL: '🎤', SIM: '🖥', CONTROL_ROOM: '🎛' }
+const TYPE_LABEL: Record<string, string> = { FLIGHT: 'FLT', REPORT: 'RPT', ORAL: 'ORL', SIM: 'SIM', CONTROL_ROOM: 'CR' }
 const STATUS_STYLE: Record<string, string> = {
   NOT_STARTED: 'bg-gray-100 text-gray-500',
   IN_PROGRESS: 'bg-amber-100 text-amber-700',
@@ -86,7 +86,7 @@ export default async function InstructorStudentPage({ params }: PageProps) {
                     entry.status === 'SUBMITTED' ? 'border-green-200 bg-green-50' :
                     'border-gray-200 bg-white',
                   )}>
-                  <span className="text-lg flex-shrink-0">{TYPE_ICON[entry.template.type] ?? '📋'}</span>
+                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium flex-shrink-0">{TYPE_LABEL[entry.template.type] ?? entry.template.type}</span>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm text-tps-navy">{entry.template.courseCode}</p>
                     <p className="text-xs text-gray-500 truncate">{entry.template.title}</p>

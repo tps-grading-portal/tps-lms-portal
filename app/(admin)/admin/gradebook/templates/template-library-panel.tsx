@@ -16,8 +16,8 @@ type Template = {
   _count:     { tasks: number; entries: number }
 }
 
-const TYPE_ICON: Record<string, string> = {
-  FLIGHT: '✈', REPORT: '📄', ORAL: '🎤', SIM: '🖥', CONTROL_ROOM: '🎛',
+const TYPE_LABEL: Record<string, string> = {
+  FLIGHT: 'Flight', REPORT: 'Report', ORAL: 'Oral', SIM: 'Sim', CONTROL_ROOM: 'Control Room',
 }
 
 const TRACK_SHORT: Record<string, string> = {
@@ -73,7 +73,7 @@ export function TemplateLibraryPanel({ templates }: { templates: Template[] }) {
                 'flex items-center gap-4 rounded-xl border px-4 py-3',
                 !t.isActive ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-gray-200 bg-white hover:border-tps-orange transition-colors'
               )}>
-                <span className="text-lg flex-shrink-0">{TYPE_ICON[t.type] ?? '📋'}</span>
+                <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded flex-shrink-0">{TYPE_LABEL[t.type] ?? t.type}</span>
                 <Link href={`/admin/gradebook/templates/${t.id}`} className="flex-1 min-w-0">
                   <p className="font-semibold text-sm text-tps-navy hover:text-tps-orange">{t.courseCode}</p>
                   <p className="text-xs text-gray-500 truncate">{t.title}</p>

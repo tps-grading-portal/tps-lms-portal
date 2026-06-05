@@ -80,7 +80,7 @@ export default function NewGradebookClassPage() {
           <h2 className="font-semibold text-gray-800">Students</h2>
           <div className="flex gap-2">
             <button onClick={() => setShowBulk(!showBulk)} className="btn-secondary text-xs">
-              {showBulk ? 'Manual entry' : '📋 Paste list'}
+              {showBulk ? 'Manual entry' : 'Paste list'}
             </button>
             <button onClick={addStudent} className="btn-primary text-xs">+ Add Student</button>
           </div>

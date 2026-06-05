@@ -18,11 +18,11 @@ const TRACKS: { value: Track; label: string }[] = [
 ]
 
 const TYPES: { value: GradesheetType; label: string }[] = [
-  { value: 'FLIGHT',       label: '✈ Flight' },
-  { value: 'REPORT',       label: '📄 Report' },
-  { value: 'ORAL',         label: '🎤 Oral' },
-  { value: 'SIM',          label: '🖥 Sim' },
-  { value: 'CONTROL_ROOM', label: '🎛 Control Room' },
+  { value: 'FLIGHT',       label: 'Flight' },
+  { value: 'REPORT',       label: 'Report' },
+  { value: 'ORAL',         label: 'Oral' },
+  { value: 'SIM',          label: 'Sim' },
+  { value: 'CONTROL_ROOM', label: 'Control Room' },
 ]
 
 interface TaskDraft {

@@ -63,23 +63,36 @@ export function TaskRow({
           </div>
         </div>
 
-        {/* Score awarded badge — in header row */}
-        {!isNA && taskResult?.scoreAwarded !== undefined && (
-          <span className={cn('text-xs font-mono font-bold px-2 py-1 rounded flex-shrink-0',
-            taskResult.isAutoFail         ? 'bg-red-200 text-red-800' :
-            taskResult.scoreAwarded >= 90 ? 'bg-green-100 text-green-700' :
-            taskResult.scoreAwarded >= 70 ? 'bg-amber-100 text-amber-700' :
-            'bg-red-100 text-red-600'
-          )}>
-            {taskResult.scoreAwarded.toFixed(0)}%
-          </span>
-        )}
-        {isNA && <span className="text-xs text-gray-400 font-medium flex-shrink-0">N/A</span>}
+        {/* Score awarded badge + N/A toggle — always in header row so N/A is always reachable */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {!isNA && taskResult?.scoreAwarded !== undefined && (
+            <span className={cn('text-xs font-mono font-bold px-2 py-1 rounded',
+              taskResult.isAutoFail         ? 'bg-red-200 text-red-800' :
+              taskResult.scoreAwarded >= 90 ? 'bg-green-100 text-green-700' :
+              taskResult.scoreAwarded >= 70 ? 'bg-amber-100 text-amber-700' :
+              'bg-red-100 text-red-600'
+            )}>
+              {taskResult.scoreAwarded.toFixed(0)}%
+            </span>
+          )}
+          {!task.isDemo && !locked && (
+            <button type="button"
+              onClick={() => onChange({ isNA: !isNA, scoreEntered: undefined })}
+              className={cn('text-xs px-2 py-1 rounded border font-medium transition-colors',
+                isNA
+                  ? 'border-tps-orange text-tps-orange bg-orange-50'
+                  : 'border-gray-200 text-gray-400 hover:border-gray-400'
+              )}>
+              N/A
+            </button>
+          )}
+          {isNA && locked && <span className="text-xs text-gray-400 font-medium">N/A</span>}
+        </div>
       </div>
 
       {!task.isDemo && !isNA && (
         <>
-          {/* Column labels */}
+          {/* Column labels — abbreviated rubric names (item D) */}
           <div className="flex gap-2 items-end mt-1">
             <div className="w-14 flex-shrink-0">
               <p className="text-[9px] text-gray-400 uppercase tracking-wide text-center">
@@ -87,11 +100,10 @@ export function TaskRow({
               </p>
             </div>
             <div className="flex-1 flex gap-1">
-              {[0, 1, 2, 3, 4].map((v) => (
-                <span key={v} className="flex-1 text-[9px] text-gray-400 text-center">{v}</span>
+              {(['Unsafe','S/Unable','Unable','Min Prof','Proficient'] as const).map((lbl) => (
+                <span key={lbl} className="flex-1 text-[8px] text-gray-400 text-center leading-tight">{lbl}</span>
               ))}
             </div>
-            {!locked && <div className="w-10 flex-shrink-0"><p className="text-[9px] text-gray-400 uppercase tracking-wide text-center">N/A</p></div>}
           </div>
 
           {/* Controls row */}
@@ -118,18 +130,6 @@ export function TaskRow({
                 </button>
               ))}
             </div>
-            {/* N/A toggle — same row */}
-            {!locked && (
-              <button type="button"
-                onClick={() => onChange({ isNA: !isNA, scoreEntered: undefined })}
-                className={cn('w-10 py-1.5 rounded-lg text-xs font-bold border transition-colors flex-shrink-0',
-                  isNA
-                    ? 'border-tps-orange text-tps-orange bg-orange-50'
-                    : 'border-gray-200 text-gray-400 hover:border-gray-400'
-                )}>
-                N/A
-              </button>
-            )}
           </div>
 
           {/* Score label + warnings */}

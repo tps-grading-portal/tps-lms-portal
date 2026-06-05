@@ -148,7 +148,7 @@ export function ImportWizard({ onImport, onClose, creatorToken }: Props) {
                   className={cn('px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                     uploadTab === tab ? 'border-tps-orange text-tps-orange' : 'border-transparent text-gray-500 hover:text-gray-800'
                   )}>
-                  {tab === 'file' ? '📂 Upload File' : '📋 Paste Text'}
+                  {tab === 'file' ? 'Upload File' : 'Paste Text'}
                 </button>
               ))}
             </div>

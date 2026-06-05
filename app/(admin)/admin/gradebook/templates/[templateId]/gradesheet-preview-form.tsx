@@ -97,7 +97,7 @@ export function GradesheetPreviewForm({ tasks }: { tasks: GradesheetTask[] }) {
           <h3 className={cn('font-semibold text-sm uppercase tracking-wide',
             sectionTasks[0]?.isAirmanship ? 'text-tps-orange' : 'text-gray-600'
           )}>
-            {sectionTasks[0]?.isAirmanship ? '✈ ' : ''}{section}
+            {section}
           </h3>
           <div className="space-y-3">
             {sectionTasks.map((task) => (

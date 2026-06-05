@@ -182,7 +182,7 @@ export function GradesheetEntryForm({ entry, isInstructor }: { entry: FullEntry;
           <h3 className={cn('font-semibold text-sm uppercase tracking-wide',
             tasks[0]?.isAirmanship ? 'text-tps-orange' : 'text-gray-600'
           )}>
-            {tasks[0]?.isAirmanship ? '✈ ' : ''}{section}
+            {section}
           </h3>
           <div className="space-y-3">
             {tasks.map((task) => {

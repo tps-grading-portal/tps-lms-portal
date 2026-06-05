@@ -62,7 +62,7 @@ const Q_TYPE_LABELS: Record<QType, string> = {
   CHECKBOX:          'Checkboxes (multiple answers)',
   TEXT:              'Free Text',
   NUMBER:            'Number Entry',
-  REPEATING_SECTION: '🔄 Repeating Section (group + individual)',
+  REPEATING_SECTION: 'Repeating Section (group + individual)',
 }
 
 const emptyQuestion = (): QuestionDraft => ({
@@ -320,7 +320,7 @@ export function AdminFormBuilder({ form, staffMembers, classes }: Props) {
             )}
           </h2>
           <div className="flex gap-2">
-            <button onClick={() => setShowWizard(true)} className="btn-secondary text-xs">📄 Import from File</button>
+            <button onClick={() => setShowWizard(true)} className="btn-secondary text-xs">Import from File</button>
             <button onClick={addQ} className="btn-primary text-sm">+ Add Question</button>
           </div>
         </div>
@@ -329,7 +329,7 @@ export function AdminFormBuilder({ form, staffMembers, classes }: Props) {
           <div className="card border border-dashed border-gray-300 text-center py-8 text-gray-400 space-y-2">
             <p>No questions yet.</p>
             <div className="flex gap-3 justify-center">
-              <button onClick={() => setShowWizard(true)} className="btn-secondary text-sm">📄 Import from File</button>
+              <button onClick={() => setShowWizard(true)} className="btn-secondary text-sm">Import from File</button>
               <button onClick={addQ} className="btn-primary text-sm">+ Add Question</button>
             </div>
           </div>
@@ -342,7 +342,7 @@ export function AdminFormBuilder({ form, staffMembers, classes }: Props) {
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-mono">
                 {q.questionType === 'REPEATING_SECTION'
-                  ? <span className="text-tps-orange font-semibold">🔄 Repeating Section</span>
+                  ? <span className="text-tps-orange font-semibold">Repeating Section</span>
                   : <span className="text-gray-400">Q{i + 1}</span>
                 }
               </span>
@@ -445,7 +445,7 @@ export function AdminFormBuilder({ form, staffMembers, classes }: Props) {
           </button>
           <button onClick={addRepeatBlock} className="border-2 border-dashed border-orange-200 rounded-xl py-3 px-4 text-sm text-orange-300 hover:border-tps-orange hover:text-tps-orange transition-colors whitespace-nowrap"
             title="Add a repeating section for per-person grading">
-            🔄 Add individual scores block
+            Add individual scores block
           </button>
         </div>
       </section>
@@ -492,7 +492,7 @@ function RepeatingSectionEditor({
   return (
     <div className="space-y-3">
       <div className="bg-orange-100 rounded-lg px-3 py-2 text-xs text-tps-orange font-semibold">
-        🔄 Repeating Section — grades one set of questions per person
+        Repeating Section — grades one set of questions per person
       </div>
       <div>
         <label className="field-label text-xs">Section Label</label>

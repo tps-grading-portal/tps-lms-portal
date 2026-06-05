@@ -98,7 +98,7 @@ export default async function GradebookPage() {
                       <p className="font-semibold text-sm text-tps-navy truncate">{student.name}</p>
                       <p className="text-[10px] text-gray-400 uppercase tracking-wide">{student.track.replace('_', '/')}</p>
                       <p className={cn('text-xs mt-1 font-medium', done === total ? 'text-green-600' : 'text-gray-500')}>
-                        {done}/{total} done {hasFail && '⚠'}
+                        {done}/{total} done {hasFail && '!'}
                       </p>
                     </Link>
                   )
