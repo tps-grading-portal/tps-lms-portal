@@ -48,6 +48,7 @@ export default async function ClassDetailPage({ params }: { params: Promise<{ cl
       lastName:     s.lastName,
       email:        s.email,
       track:        s.track,
+      hasLogin:     !!s.userId,
       gradedCount:  submitted.length,
       totalEntries: s._count.entries,
       avgScore:     avg,

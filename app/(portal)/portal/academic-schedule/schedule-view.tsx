@@ -4,10 +4,13 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { deptSortIndex, deptLabel } from '@/lib/mcg-departments'
+import { WeekCalendar } from './week-calendar'
 import {
   createWeekAction, updateWeekAction, deleteWeekAction,
   scheduleEventAction, unscheduleEventAction, toggleConfirmAction,
+  generateWeeksAction,
   type WeekRow, type ScheduledEventRow, type CatalogEvent, type InstructorOption,
+  type ScheduleConflict,
 } from './actions'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -63,13 +66,15 @@ function EventFormModal({
   const router = useRouter()
   const [pending, startTx] = useTransition()
   const [error,   setError] = useState<string | null>(null)
+  const [conflicts, setConflicts] = useState<ScheduleConflict[] | null>(null)
   const [form,    setForm]  = useState(state)
 
   function set<K extends keyof EventFormState>(key: K, val: EventFormState[K]) {
     setForm(prev => ({ ...prev, [key]: val }))
+    setConflicts(null)
   }
 
-  function handleSave() {
+  function handleSave(override = false) {
     setError(null)
     startTx(async () => {
       const result = await scheduleEventAction(classId, form.syllabusEventId, {
@@ -79,7 +84,9 @@ function EventFormModal({
         scheduledTime:   form.scheduledTime || null,
         durationMinutes: form.durationMinutes ? parseInt(form.durationMinutes) : null,
         locationRoom:    form.locationRoom || null,
+        override,
       })
+      if ('conflicts' in result && result.conflicts) { setConflicts(result.conflicts); return }
       if ('error' in result) { setError(result.error ?? 'Failed'); return }
       router.refresh()
       onClose()
@@ -165,8 +172,31 @@ function EventFormModal({
 
           {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
 
+          {/* Conflict warning + override */}
+          {conflicts && (
+            <div className="rounded-lg bg-amber-50 border border-amber-300 px-3 py-3 space-y-2">
+              <p className="text-sm font-semibold text-amber-800">
+                ⚠ This time overlaps {conflicts.length === 1 ? 'another event' : `${conflicts.length} other events`} for this class:
+              </p>
+              <ul className="space-y-1">
+                {conflicts.map((c, i) => (
+                  <li key={i} className="text-xs text-amber-800">
+                    <span className="font-mono font-bold">{c.courseCode}</span> {c.title} · {c.time}
+                  </li>
+                ))}
+              </ul>
+              <button
+                onClick={() => handleSave(true)}
+                disabled={pending}
+                className="w-full text-sm py-2 rounded-lg font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+              >
+                {pending ? 'Saving…' : 'Schedule Anyway (Override)'}
+              </button>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-2">
-            <button onClick={handleSave} disabled={pending} className="btn-primary flex-1 text-sm py-2.5">
+            <button onClick={() => handleSave(false)} disabled={pending} className="btn-primary flex-1 text-sm py-2.5">
               {pending ? 'Saving…' : 'Save'}
             </button>
             {form.scheduleId && (
@@ -177,6 +207,61 @@ function EventFormModal({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Week generation setup (class start → grad date) ──────────────────────────
+
+function GenerateWeeksPanel({
+  classId, defaultStart, defaultEnd,
+}: {
+  classId:      string
+  defaultStart: string | null
+  defaultEnd:   string | null
+}) {
+  const router = useRouter()
+  const [pending, startTx] = useTransition()
+  const [error,   setError] = useState<string | null>(null)
+  const [start,   setStart] = useState(defaultStart ?? '')
+  const [grad,    setGrad]  = useState(defaultEnd ?? '')
+
+  function handleGenerate() {
+    setError(null)
+    if (!start || !grad) { setError('Both dates are required.'); return }
+    startTx(async () => {
+      const result = await generateWeeksAction(classId, start, grad)
+      if ('error' in result && result.error) { setError(result.error); return }
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="card max-w-lg space-y-4">
+      <div>
+        <h2 className="font-bold text-tps-navy">Set Up the Class Schedule</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          Enter the class start date and graduation date. Weeks run Monday–Friday
+          and are numbered from <strong>Week 0</strong> upward.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="field-label">Class Start Date *</label>
+          <input type="date" value={start} onChange={e => setStart(e.target.value)} className="field-input" disabled={pending} />
+        </div>
+        <div>
+          <label className="field-label">Graduation Date *</label>
+          <input type="date" value={grad} onChange={e => setGrad(e.target.value)} className="field-input" disabled={pending} />
+        </div>
+      </div>
+
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+      <button onClick={handleGenerate} disabled={pending || !start || !grad} className="btn-primary text-sm px-5 py-2.5">
+        {pending ? 'Generating…' : 'Generate Weeks'}
+      </button>
     </div>
   )
 }
@@ -434,6 +519,8 @@ type Props = {
   classes:           { id: string; name: string; isActive: boolean }[]
   selectedClassId:   string
   selectedClassName: string
+  classStartDate:    string | null
+  classEndDate:      string | null
   weeks:             WeekRow[]
   unscheduled:       ScheduledEventRow[]
   catalog:           CatalogEvent[]
@@ -441,13 +528,25 @@ type Props = {
   canEdit:           boolean
 }
 
+function defaultWeekIndex(weeks: WeekRow[]): number {
+  const today = new Date().toISOString().slice(0, 10)
+  const idx = weeks.findIndex(w => w.startDate.slice(0, 10) <= today && today <= w.endDate.slice(0, 10))
+  return idx >= 0 ? idx : 0
+}
+
 export function ScheduleView({
-  classes, selectedClassId, selectedClassName, weeks, unscheduled, catalog, instructors, canEdit,
+  classes, selectedClassId, selectedClassName, classStartDate, classEndDate,
+  weeks, unscheduled, catalog, instructors, canEdit,
 }: Props) {
   const router = useRouter()
   const [eventForm,  setEventForm]  = useState<EventFormState | null>(null)
   const [weekForm,   setWeekForm]   = useState<WeekFormState | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [viewMode,   setViewMode]   = useState<'calendar' | 'list'>('calendar')
+  const [weekIdx,    setWeekIdx]    = useState(() => defaultWeekIndex(weeks))
+  const [slotPick,   setSlotPick]   = useState<{ date: string; time: string } | null>(null)
+
+  const activeWeek = weeks[Math.min(weekIdx, Math.max(0, weeks.length - 1))] ?? null
 
   function openEventEdit(e: ScheduledEventRow) {
     setEventForm({
@@ -471,13 +570,19 @@ export function ScheduleView({
       courseCode:      e.courseCode,
       title:           e.title,
       scheduleId:      null,
-      academicWeekId:  null,
+      academicWeekId:  slotPick && activeWeek ? activeWeek.id : null,
       instructorId:    null,
-      scheduledDate:   '',
-      scheduledTime:   '',
-      durationMinutes: '',
+      scheduledDate:   slotPick?.date ?? '',
+      scheduledTime:   slotPick?.time ?? '',
+      durationMinutes: slotPick ? '60' : '',
       locationRoom:    '',
     })
+    setSlotPick(null)
+  }
+
+  function handleSlotClick(dateISO: string, time: string) {
+    setSlotPick({ date: dateISO, time })
+    setPickerOpen(true)
   }
 
   async function handleToggleConfirm(scheduleId: string) {
@@ -508,19 +613,37 @@ export function ScheduleView({
               {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
+
+          {/* View toggle */}
+          {weeks.length > 0 && (
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+              {(['calendar', 'list'] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setViewMode(m)}
+                  className={`px-3 py-2 text-xs font-medium transition-colors ${
+                    viewMode === m ? 'bg-tps-navy text-white' : 'bg-white text-gray-600 hover:text-tps-navy'
+                  }`}
+                >
+                  {m === 'calendar' ? 'Calendar' : 'List'}
+                </button>
+              ))}
+            </div>
+          )}
+
           {canEdit && (
             <>
               <button
                 onClick={() => setWeekForm({
                   weekId: null,
-                  weekNumber: (Math.max(0, ...weeks.map(w => w.weekNumber)) + 1).toString(),
+                  weekNumber: (Math.max(-1, ...weeks.map(w => w.weekNumber)) + 1).toString(),
                   label: '', theme: '', startDate: '', endDate: '',
                 })}
                 className="btn-secondary text-sm px-3 py-2"
               >
                 + Week
               </button>
-              <button onClick={() => setPickerOpen(true)} className="btn-primary text-sm px-3 py-2">
+              <button onClick={() => { setSlotPick(null); setPickerOpen(true) }} className="btn-primary text-sm px-3 py-2">
                 + Schedule Event
               </button>
             </>
@@ -528,16 +651,78 @@ export function ScheduleView({
         </div>
       </div>
 
-      {/* Empty state */}
-      {weeks.length === 0 && unscheduled.length === 0 && (
+      {/* No weeks yet — generate from class dates */}
+      {weeks.length === 0 && canEdit && (
+        <GenerateWeeksPanel
+          classId={selectedClassId}
+          defaultStart={classStartDate}
+          defaultEnd={classEndDate}
+        />
+      )}
+      {weeks.length === 0 && !canEdit && (
         <div className="card text-center py-16 text-gray-400 text-sm">
-          No academic schedule yet.
-          {canEdit && ' Start by adding a week, then schedule events into it.'}
+          No academic schedule has been published yet.
         </div>
       )}
 
-      {/* Week sections */}
-      {weeks.map(week => (
+      {/* ── Calendar view ── */}
+      {viewMode === 'calendar' && activeWeek && (
+        <div className="space-y-3">
+          {/* Week navigation */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
+              disabled={weekIdx === 0}
+              className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
+            >
+              ← Prev
+            </button>
+            <select
+              value={activeWeek.id}
+              onChange={e => setWeekIdx(weeks.findIndex(w => w.id === e.target.value))}
+              className="field-input w-auto text-sm font-medium"
+            >
+              {weeks.map(w => (
+                <option key={w.id} value={w.id}>
+                  Week {w.weekNumber} · {fmtRange(w.startDate, w.endDate)}{w.theme ? ` · ${w.theme}` : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
+              disabled={weekIdx >= weeks.length - 1}
+              className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
+            >
+              Next →
+            </button>
+            {canEdit && (
+              <button
+                onClick={() => setWeekForm({
+                  weekId: activeWeek.id,
+                  weekNumber: activeWeek.weekNumber.toString(),
+                  label: activeWeek.label,
+                  theme: activeWeek.theme ?? '',
+                  startDate: toInputDate(activeWeek.startDate),
+                  endDate: toInputDate(activeWeek.endDate),
+                })}
+                className="text-xs text-gray-400 hover:text-tps-navy ml-auto"
+              >
+                Edit week
+              </button>
+            )}
+          </div>
+
+          <WeekCalendar
+            week={activeWeek}
+            canEdit={canEdit}
+            onSlotClick={handleSlotClick}
+            onEventClick={openEventEdit}
+          />
+        </div>
+      )}
+
+      {/* ── List view ── */}
+      {viewMode === 'list' && weeks.map(week => (
         <section key={week.id}>
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <div className="flex items-baseline gap-3 flex-wrap">
@@ -616,7 +801,11 @@ export function ScheduleView({
         <WeekFormModal state={weekForm} classId={selectedClassId} onClose={() => setWeekForm(null)} />
       )}
       {pickerOpen && (
-        <CatalogPicker catalog={catalog} onPick={openCatalogPick} onClose={() => setPickerOpen(false)} />
+        <CatalogPicker
+          catalog={catalog}
+          onPick={openCatalogPick}
+          onClose={() => { setPickerOpen(false); setSlotPick(null) }}
+        />
       )}
     </div>
   )

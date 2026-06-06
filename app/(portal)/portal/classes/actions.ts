@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/server-auth'
 import { can } from '@/lib/permissions'
 import { revalidatePath } from 'next/cache'
+import bcrypt from 'bcryptjs'
 import type { Track, Concentration } from '@prisma/client'
 
 // ── Create class ──────────────────────────────────────────────────────────────
@@ -91,17 +92,59 @@ export async function archiveClassAction(classId: string) {
 
 // ── Add student to class ──────────────────────────────────────────────────────
 
+/**
+ * Provision a student's curriculum: a StudentSyllabusEvent row for every
+ * active MCG event matching their track, plus gradebook entries for every
+ * active gradesheet template matching their track.
+ */
+async function provisionStudentCurriculum(studentId: string, track: Track) {
+  // Syllabus events (full MCG roadmap for their track)
+  const events = await db.syllabusEvent.findMany({
+    where:  { isActive: true, tracks: { has: track } },
+    select: { id: true },
+  })
+  if (events.length > 0) {
+    await db.studentSyllabusEvent.createMany({
+      data: events.map(e => ({ studentId, syllabusEventId: e.id, status: 'LOCKED' as const })),
+      skipDuplicates: true,
+    })
+  }
+
+  // Gradebook entries for matching templates
+  const templates = await db.gradesheetTemplate.findMany({
+    where:  { isActive: true, tracks: { has: track } },
+    select: { id: true },
+  })
+  for (const tmpl of templates) {
+    await db.gradebookEntry.upsert({
+      where:  { studentId_templateId: { studentId, templateId: tmpl.id } },
+      update: {},
+      create: { studentId, templateId: tmpl.id },
+    })
+  }
+}
+
 export async function addStudentAction(classId: string, data: {
-  firstName: string
-  lastName:  string
-  email:     string | null
-  track:     Track
-  number:    number | null  // null = auto-assign next number
+  firstName:   string
+  lastName:    string
+  email:       string | null
+  track:       Track
+  number:      number | null  // null = auto-assign next number
+  createLogin: boolean
+  password:    string | null  // required when createLogin
 }) {
   const user = await requireAuth()
   if (!can(user.role, 'manage:classes')) return { error: 'Insufficient permissions' }
 
   if (!data.firstName.trim() || !data.lastName.trim()) return { error: 'First and last name are required.' }
+
+  const email = data.email?.trim().toLowerCase() || null
+  if (data.createLogin) {
+    if (!email)                 return { error: 'Email is required to create a portal login.' }
+    if (!data.password || data.password.length < 12) return { error: 'Login password must be at least 12 characters.' }
+    const userTaken = await db.user.findUnique({ where: { email } })
+    if (userTaken) return { error: 'A portal account with that email already exists.' }
+  }
 
   // Auto-assign next number if not provided
   let number = data.number
@@ -115,9 +158,24 @@ export async function addStudentAction(classId: string, data: {
     if (existing) return { error: `Student number ${number} is already taken in this class.` }
   }
 
-  if (data.email) {
-    const emailTaken = await db.student.findUnique({ where: { email: data.email.trim().toLowerCase() } })
+  if (email) {
+    const emailTaken = await db.student.findUnique({ where: { email } })
     if (emailTaken) return { error: 'A student with that email already exists.' }
+  }
+
+  // Optional portal login — the class dictates their curriculum below
+  let userId: string | null = null
+  if (data.createLogin && email && data.password) {
+    const account = await db.user.create({
+      data: {
+        email,
+        firstName:    data.firstName.trim(),
+        lastName:     data.lastName.trim(),
+        role:         'STUDENT',
+        passwordHash: await bcrypt.hash(data.password, 12),
+      },
+    })
+    userId = account.id
   }
 
   const student = await db.student.create({
@@ -127,25 +185,51 @@ export async function addStudentAction(classId: string, data: {
       track:     data.track,
       firstName: data.firstName.trim(),
       lastName:  data.lastName.trim(),
-      email:     data.email?.trim().toLowerCase() || null,
+      email,
+      userId,
     },
   })
 
-  // Generate gradebook entries for templates matching this student's track
-  const templates = await db.gradesheetTemplate.findMany({
-    where:  { isActive: true, tracks: { has: data.track } },
-    select: { id: true },
-  })
-  for (const tmpl of templates) {
-    await db.gradebookEntry.upsert({
-      where:  { studentId_templateId: { studentId: student.id, templateId: tmpl.id } },
-      update: {},
-      create: { studentId: student.id, templateId: tmpl.id },
-    })
-  }
+  await provisionStudentCurriculum(student.id, data.track)
 
   revalidatePath(`/portal/classes/${classId}`)
   return { ok: true, studentId: student.id }
+}
+
+// ── Create portal login for an existing student ───────────────────────────────
+
+export async function createStudentLoginAction(studentId: string, password: string) {
+  const actor = await requireAuth()
+  if (!can(actor.role, 'manage:classes')) return { error: 'Insufficient permissions' }
+  if (password.length < 12) return { error: 'Password must be at least 12 characters.' }
+
+  const student = await db.student.findUnique({
+    where:  { id: studentId },
+    select: { id: true, classId: true, firstName: true, lastName: true, email: true, userId: true, track: true },
+  })
+  if (!student)        return { error: 'Student not found.' }
+  if (student.userId)  return { error: 'This student already has a portal login.' }
+  if (!student.email)  return { error: 'Add an email to the student profile first.' }
+
+  const userTaken = await db.user.findUnique({ where: { email: student.email } })
+  if (userTaken) return { error: 'A portal account with that email already exists.' }
+
+  const account = await db.user.create({
+    data: {
+      email:        student.email,
+      firstName:    student.firstName,
+      lastName:     student.lastName,
+      role:         'STUDENT',
+      passwordHash: await bcrypt.hash(password, 12),
+    },
+  })
+  await db.student.update({ where: { id: studentId }, data: { userId: account.id } })
+
+  // Backfill curriculum in case the student predates MCG provisioning
+  await provisionStudentCurriculum(studentId, student.track)
+
+  revalidatePath(`/portal/classes/${student.classId}`)
+  return { ok: true }
 }
 
 // ── Update student ────────────────────────────────────────────────────────────

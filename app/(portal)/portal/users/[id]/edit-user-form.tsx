@@ -8,7 +8,8 @@ import type { UserRole, Track } from '@prisma/client'
 
 const ROLE_LABELS: Record<UserRole, string> = {
   SYSTEM_ADMIN: 'System Admin', DEAN_COMMANDER: 'Dean / Commander', A9_STANDARDS: 'A9 Standards',
-  DEPT_CHAIR: 'Dept Chair', LINE_INSTRUCTOR: 'Line Instructor', STUDENT: 'Student',
+  DEPT_CHAIR: 'Dept Chair', ADO: 'ADO', DO: 'DO',
+  LINE_INSTRUCTOR: 'Line Instructor', GUEST_INSTRUCTOR: 'Guest Instructor', STUDENT: 'Student',
 }
 
 function generatePassword(): string {

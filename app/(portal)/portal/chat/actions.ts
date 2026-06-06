@@ -116,21 +116,35 @@ export async function getChannelsAction(classId: string): Promise<ChannelSummary
 
 // ── Send a message ────────────────────────────────────────────────────────────
 
+export type ChatAttachment = {
+  name:      string
+  url:       string
+  mimeType:  string
+  sizeBytes: number
+}
+
 export async function sendMessageAction(
   channelId: string,
   content:   string,
+  attachments?: ChatAttachment[],
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireAuth()
 
   const trimmed = content.trim()
-  if (!trimmed)         return { ok: false, error: 'Message cannot be empty' }
-  if (trimmed.length > 4000) return { ok: false, error: 'Message too long (max 4000 chars)' }
+  const hasAttachments = !!attachments && attachments.length > 0
+  if (!trimmed && !hasAttachments) return { ok: false, error: 'Message cannot be empty' }
+  if (trimmed.length > 4000)       return { ok: false, error: 'Message too long (max 4000 chars)' }
 
   const channel = await db.chatChannel.findUnique({ where: { id: channelId } })
   if (!channel || channel.isArchived) return { ok: false, error: 'Channel not found' }
 
   await db.chatMessage.create({
-    data: { channelId, authorId: user.id, content: trimmed },
+    data: {
+      channelId,
+      authorId:    user.id,
+      content:     trimmed,
+      attachments: hasAttachments ? attachments : undefined,
+    },
   })
 
   // Update last-read for sender
@@ -141,6 +155,34 @@ export async function sendMessageAction(
   })
 
   return { ok: true }
+}
+
+// ── Upload a chat attachment (image or document) ─────────────────────────────
+
+export async function uploadChatAttachmentAction(formData: FormData): Promise<
+  { ok: true; attachment: ChatAttachment } | { ok: false; error: string }
+> {
+  await requireAuth()
+
+  const file = formData.get('file') as File | null
+  if (!file || file.size === 0)      return { ok: false, error: 'No file provided.' }
+  if (file.size > 25 * 1024 * 1024)  return { ok: false, error: 'Attachment exceeds 25 MB limit.' }
+
+  const { uploadFile } = await import('@/lib/storage')
+  const bytes = Buffer.from(await file.arrayBuffer())
+  const uploaded = await uploadFile(file.name, file.type || 'application/octet-stream', bytes, 'chat')
+
+  if (!uploaded.storageUrl) return { ok: false, error: 'Upload failed — no URL returned.' }
+
+  return {
+    ok: true,
+    attachment: {
+      name:      file.name,
+      url:       uploaded.storageUrl,
+      mimeType:  file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+    },
+  }
 }
 
 // ── Fetch active class for current user ───────────────────────────────────────

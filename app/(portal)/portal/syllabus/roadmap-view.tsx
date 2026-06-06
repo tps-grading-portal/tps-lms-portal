@@ -41,10 +41,11 @@ function scoreColor(score: number): string {
   return 'text-red-600 font-bold'
 }
 
-function EventNode({ event, expanded, onToggle }: {
+function EventNode({ event, expanded, onToggle, eventById }: {
   event: RoadmapEvent
   expanded: boolean
   onToggle: () => void
+  eventById: Map<string, RoadmapEvent>
 }) {
   const meta = getStatusMeta(event.status)
 
@@ -104,10 +105,25 @@ function EventNode({ event, expanded, onToggle }: {
           <div className="flex flex-wrap gap-2 text-[10px] text-gray-500">
             <span>Event type: <strong>{event.eventSuffix}</strong></span>
             <span>Tracks: <strong>{event.tracks.join(', ')}</strong></span>
-            {event.prerequisiteIds.length > 0 && (
-              <span>{event.prerequisiteIds.length} prerequisite(s)</span>
-            )}
           </div>
+          {event.prerequisiteIds.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1 text-[10px] text-gray-500">
+              <span className="font-semibold">Prereqs:</span>
+              {event.prerequisiteIds.map(pid => {
+                const prereq = eventById.get(pid)
+                if (!prereq) return null
+                return (
+                  <Link
+                    key={pid}
+                    href={`/portal/lessons/${encodeURIComponent(prereq.courseCode)}`}
+                    className="font-mono font-bold bg-gray-100 hover:bg-tps-navy/10 text-tps-navy px-1.5 py-0.5 rounded"
+                  >
+                    {prereq.courseCode}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
           <Link
             href={`/portal/lessons/${encodeURIComponent(event.courseCode)}`}
             className="inline-block text-xs font-semibold text-tps-orange hover:underline"
@@ -171,11 +187,42 @@ function ProgressBar({ events }: { events: RoadmapEvent[] }) {
 
 const ALL_STATUSES: (SyllabusEventStatus | 'all')[] = ['all', 'LOCKED', 'UPCOMING', 'IN_PROGRESS', 'COMPLETED', 'REVIEW']
 
+/**
+ * Topological "flow levels": level 0 = no prerequisites; level n = one step
+ * after its deepest prerequisite. Visualizes the syllabus dependency flow.
+ */
+function computeFlowLevels(events: RoadmapEvent[]): Map<string, number> {
+  const byId = new Map(events.map(e => [e.id, e]))
+  const levels = new Map<string, number>()
+
+  function levelOf(id: string, stack: Set<string>): number {
+    const cached = levels.get(id)
+    if (cached !== undefined) return cached
+    if (stack.has(id)) return 0 // defensive: break cycles
+    const event = byId.get(id)
+    if (!event) return 0
+    stack.add(id)
+    const prereqLevels = event.prerequisiteIds
+      .filter(pid => byId.has(pid))
+      .map(pid => levelOf(pid, stack))
+    stack.delete(id)
+    const level = prereqLevels.length === 0 ? 0 : Math.max(...prereqLevels) + 1
+    levels.set(id, level)
+    return level
+  }
+
+  for (const e of events) levelOf(e.id, new Set())
+  return levels
+}
+
 export function RoadmapView({ events, studentName }: Props) {
   const [filterStatus, setFilterStatus] = useState<SyllabusEventStatus | 'all'>('all')
   const [filterDept,   setFilterDept]   = useState<DepartmentCode | 'all'>('all')
   const [expandedId,   setExpandedId]   = useState<string | null>(null)
   const [search,       setSearch]       = useState('')
+  const [flowMode,     setFlowMode]     = useState(false)
+
+  const eventById = useMemo(() => new Map(events.map(e => [e.id, e])), [events])
 
   // Departments present, in MCG curriculum order
   const depts = useMemo(
@@ -205,6 +252,25 @@ export function RoadmapView({ events, studentName }: Props) {
     }
     return new Map([...map.entries()].sort((a, b) => deptSortIndex(a[0]) - deptSortIndex(b[0])))
   }, [filtered])
+
+  // Flow mode: group by prerequisite depth instead
+  const byFlowLevel = useMemo(() => {
+    if (!flowMode) return new Map<number, RoadmapEvent[]>()
+    const levels = computeFlowLevels(events)
+    const map = new Map<number, RoadmapEvent[]>()
+    for (const e of filtered) {
+      const lvl = levels.get(e.id) ?? 0
+      if (!map.has(lvl)) map.set(lvl, [])
+      map.get(lvl)!.push(e)
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) =>
+        deptSortIndex(a.deptCode) - deptSortIndex(b.deptCode) ||
+        a.courseCode.localeCompare(b.courseCode, undefined, { numeric: true }),
+      )
+    }
+    return new Map([...map.entries()].sort((a, b) => a[0] - b[0]))
+  }, [flowMode, events, filtered])
 
   const hasStudentData = events.some(e => e.status !== null)
 
@@ -240,6 +306,26 @@ export function RoadmapView({ events, studentName }: Props) {
           onChange={e => setSearch(e.target.value)}
           className="field-input flex-1"
         />
+
+        {/* View mode toggle */}
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden self-start">
+          <button
+            onClick={() => setFlowMode(false)}
+            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+              !flowMode ? 'bg-tps-navy text-white' : 'bg-white text-gray-600 hover:text-tps-navy'
+            }`}
+          >
+            By Course
+          </button>
+          <button
+            onClick={() => setFlowMode(true)}
+            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+              flowMode ? 'bg-tps-navy text-white' : 'bg-white text-gray-600 hover:text-tps-navy'
+            }`}
+          >
+            Prerequisite Flow
+          </button>
+        </div>
 
         <div className="flex gap-1 flex-wrap">
           {(['all', ...depts] as (DepartmentCode | 'all')[]).map(d => (
@@ -278,7 +364,7 @@ export function RoadmapView({ events, studentName }: Props) {
       <p className="text-xs text-gray-400">{filtered.length} event{filtered.length !== 1 ? 's' : ''} shown</p>
 
       {/* Course (department) sections — MCG order */}
-      {byDept.size === 0 ? (
+      {!flowMode && (byDept.size === 0 ? (
         <div className="card text-center py-10 text-gray-400">No events match your filters.</div>
       ) : (
         Array.from(byDept.entries()).map(([dept, deptEvents]) => (
@@ -301,12 +387,43 @@ export function RoadmapView({ events, studentName }: Props) {
                   event={event}
                   expanded={expandedId === event.id}
                   onToggle={() => setExpandedId(expandedId === event.id ? null : event.id)}
+                  eventById={eventById}
                 />
               ))}
             </div>
           </section>
         ))
-      )}
+      ))}
+
+      {/* Prerequisite flow — events ordered by dependency depth */}
+      {flowMode && (byFlowLevel.size === 0 ? (
+        <div className="card text-center py-10 text-gray-400">No events match your filters.</div>
+      ) : (
+        Array.from(byFlowLevel.entries()).map(([level, levelEvents]) => (
+          <section key={level}>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="h-px flex-1 bg-gray-200" />
+              <span className="text-xs font-bold text-tps-navy uppercase tracking-wider px-2">
+                {level === 0 ? 'Start — No Prerequisites' : `Flow Step ${level}`}
+              </span>
+              <div className="h-px flex-1 bg-gray-200" />
+              <span className="text-xs text-gray-400">{levelEvents.length} events</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {levelEvents.map(event => (
+                <EventNode
+                  key={event.id}
+                  event={event}
+                  expanded={expandedId === event.id}
+                  onToggle={() => setExpandedId(expandedId === event.id ? null : event.id)}
+                  eventById={eventById}
+                />
+              ))}
+            </div>
+          </section>
+        ))
+      ))}
     </div>
   )
 }

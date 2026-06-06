@@ -4,15 +4,19 @@ import Link from 'next/link'
 import { useFormStatus } from 'react-dom'
 import { signOutAction } from '@/app/portal-signout-action'
 import { TPSPatchBadge } from '@/components/ui/tps-branding'
+import { NotificationBell } from './notification-bell'
 import type { UserRole } from '@prisma/client'
 
 const ROLE_LABELS: Record<UserRole, string> = {
-  SYSTEM_ADMIN:    'System Admin',
-  DEAN_COMMANDER:  'Dean / Commander',
-  A9_STANDARDS:    'A9 Standards',
-  DEPT_CHAIR:      'Dept Chair',
-  LINE_INSTRUCTOR: 'Instructor',
-  STUDENT:         'Student',
+  SYSTEM_ADMIN:     'System Admin',
+  DEAN_COMMANDER:   'Dean / Commander',
+  A9_STANDARDS:     'A9 Standards',
+  DEPT_CHAIR:       'Dept Chair',
+  ADO:              'ADO',
+  DO:               'DO',
+  LINE_INSTRUCTOR:  'Instructor',
+  GUEST_INSTRUCTOR: 'Guest Instructor',
+  STUDENT:          'Student',
 }
 
 function SignOutButton() {
@@ -49,6 +53,8 @@ export function PortalTopNav({
       <div className="flex-1" />
 
       <div className="flex items-center gap-4">
+        <NotificationBell />
+
         <div className="text-right hidden sm:block">
           <p className="text-white text-sm font-semibold leading-tight">
             {firstName} {lastName}

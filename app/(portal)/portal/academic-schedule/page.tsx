@@ -34,6 +34,8 @@ export default async function AcademicSchedulePage({
         classes={data.classes}
         selectedClassId={data.selectedClassId}
         selectedClassName={data.selectedClassName ?? ''}
+        classStartDate={data.classStartDate}
+        classEndDate={data.classEndDate}
         weeks={data.weeks}
         unscheduled={data.unscheduled}
         catalog={data.catalog}

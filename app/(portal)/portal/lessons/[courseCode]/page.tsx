@@ -2,6 +2,8 @@ import { redirect, notFound } from 'next/navigation'
 import { auth } from '@/lib/auth'
 import { getLessonPageAction } from './actions'
 import { LessonEditor } from './lesson-editor'
+import { CourseContent, type FileRow, type LessonRow } from './course-content'
+import { PrereqEditor } from './prereq-editor'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 
@@ -25,11 +27,28 @@ const STATUS_STYLES: Record<string, { label: string; color: string }> = {
   REVIEW:      { label: 'Needs Review',color: 'bg-red-100 text-red-600' },
 }
 
-function FileSizeLabel({ bytes }: { bytes: number | null }) {
-  if (!bytes) return null
-  if (bytes < 1024)        return <span>{bytes} B</span>
-  if (bytes < 1024 * 1024) return <span>{(bytes / 1024).toFixed(0)} KB</span>
-  return <span>{(bytes / 1024 / 1024).toFixed(1)} MB</span>
+type RawFile = {
+  id: string
+  lessonId: string | null
+  displayLabel: string | null
+  contentFile: {
+    id: string; title: string; storageUrl: string | null; mimeType: string | null
+    fileSizeBytes: number | null; status: string; fileName: string | null
+  }
+}
+
+function toFileRow(f: RawFile): FileRow {
+  return {
+    id:            f.id,
+    contentFileId: f.contentFile.id,
+    title:         f.contentFile.title,
+    fileName:      f.contentFile.fileName,
+    storageUrl:    f.contentFile.storageUrl,
+    mimeType:      f.contentFile.mimeType,
+    fileSizeBytes: f.contentFile.fileSizeBytes,
+    status:        f.contentFile.status,
+    displayLabel:  f.displayLabel,
+  }
 }
 
 export default async function LessonPage({ params }: { params: Promise<{ courseCode: string }> }) {
@@ -39,8 +58,12 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
   const { courseCode } = await params
   const decoded = decodeURIComponent(courseCode)
 
-  const { event, studentContext, canAuthor } = await getLessonPageAction(decoded)
-  if (!event) notFound()
+  const data = await getLessonPageAction(decoded)
+  if (!data.event) notFound()
+  const { event, studentContext } = data
+  const canAuthor = 'canAuthor' in data ? data.canAuthor : false
+  const canUpload = 'canUpload' in data ? data.canUpload : false
+  const isStudent = 'isStudent' in data ? data.isStudent : false
 
   const schedule  = event.schedules[0] ?? null
   const lesson    = event.lessonPage
@@ -49,6 +72,24 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
     : []
 
   const statusMeta = studentContext ? STATUS_STYLES[studentContext.status] : null
+
+  // Students only see A9-approved (VAULT) files
+  const visibleFile = (f: RawFile) => !isStudent || f.contentFile.status === 'VAULT'
+
+  const allFiles: RawFile[] = (lesson?.files ?? []) as RawFile[]
+  const courseFiles: FileRow[] = allFiles
+    .filter(f => f.lessonId === null && visibleFile(f))
+    .map(toFileRow)
+
+  const lessons: LessonRow[] = (lesson?.lessons ?? []).map(l => ({
+    id:       l.id,
+    title:    l.title,
+    overview: l.overview,
+    outline:  l.outline,
+    tlos:     Array.isArray(l.tlos) ? (l.tlos as string[]) : [],
+    plos:     Array.isArray(l.plos) ? (l.plos as string[]) : [],
+    files:    (l.files as RawFile[]).filter(visibleFile).map(toFileRow),
+  }))
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12">
@@ -68,7 +109,7 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
           <div>
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <span className="text-xs font-bold tracking-widest text-white/60 uppercase">
-                {event.deptCode} · Phase {event.phase}
+                {event.deptCode}
               </span>
               <span className="text-xs bg-white/10 rounded px-2 py-0.5 font-mono">
                 {SUFFIX_LABELS[event.eventSuffix] ?? event.eventSuffix}
@@ -82,6 +123,9 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
             </div>
             <h1 className="text-2xl font-bold">{event.courseCode}</h1>
             <p className="text-white/80 text-base mt-0.5">{event.title}</p>
+            {event.description && (
+              <p className="text-white/50 text-xs mt-1">{event.description}</p>
+            )}
           </div>
 
           {statusMeta && (
@@ -115,18 +159,18 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
         )}
       </div>
 
-      {/* Overview */}
-      {lesson?.overview ? (
+      {/* Course overview */}
+      {lesson?.overview && (
         <section className="card">
-          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Overview</h2>
+          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Course Overview</h2>
           <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-line">{lesson.overview}</p>
         </section>
-      ) : !canAuthor ? null : null}
+      )}
 
-      {/* Learning Objectives */}
+      {/* Course-level objectives */}
       {objectives.length > 0 && (
         <section className="card">
-          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Learning Objectives</h2>
+          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Course Learning Objectives</h2>
           <ol className="space-y-2">
             {objectives.map((obj, i) => (
               <li key={i} className="flex gap-3 text-sm text-gray-700">
@@ -140,73 +184,38 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
         </section>
       )}
 
-      {/* Outline */}
+      {/* Course outline */}
       {lesson?.outline && (
         <section className="card">
-          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Lesson Outline</h2>
+          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Course Outline</h2>
           <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">{lesson.outline}</pre>
         </section>
       )}
 
-      {/* Course materials */}
-      {lesson?.files && lesson.files.length > 0 && (
-        <section className="card">
-          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Course Materials</h2>
-          <div className="space-y-2">
-            {lesson.files.map(lf => (
-              <div key={lf.id} className="flex items-center gap-3 py-2 border-b border-gray-100 last:border-0">
-                <div className="w-8 h-8 rounded-lg bg-tps-navy/10 flex items-center justify-center shrink-0">
-                  <svg className="w-4 h-4 text-tps-navy" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">
-                    {lf.displayLabel || lf.contentFile.title}
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    {lf.contentFile.mimeType?.split('/')[1]?.toUpperCase() ?? 'File'}
-                    {' · '}<FileSizeLabel bytes={lf.contentFile.fileSizeBytes} />
-                  </p>
-                </div>
-                {lf.contentFile.storageUrl && (
-                  <a
-                    href={lf.contentFile.storageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-secondary text-xs px-3 py-1.5 shrink-0"
-                  >
-                    Open
-                  </a>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {/* Course documents + lessons (uploads, TLO/PLO, materials) */}
+      <CourseContent
+        syllabusEventId={event.id}
+        courseFiles={courseFiles}
+        lessons={lessons}
+        canAuthor={canAuthor}
+        canUpload={canUpload && !isStudent}
+        isStudent={isStudent}
+      />
 
-      {/* Prerequisites */}
-      {event.prerequisites.length > 0 && (
-        <section className="card">
-          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Prerequisites</h2>
-          <div className="flex flex-wrap gap-2">
-            {event.prerequisites.map(p => (
-              <Link
-                key={p.prerequisiteId}
-                href={`/portal/lessons/${encodeURIComponent(p.prerequisite.courseCode)}`}
-                className="inline-flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-tps-navy/10 text-gray-700 hover:text-tps-navy px-3 py-1.5 rounded-lg transition-colors"
-              >
-                <span className="font-mono font-bold">{p.prerequisite.courseCode}</span>
-                <span className="text-gray-500">{p.prerequisite.title}</span>
-                {p.isHard && <span className="text-red-500">·required</span>}
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
+      {/* Prerequisites — editable by scoped roles */}
+      <PrereqEditor
+        syllabusEventId={event.id}
+        prereqs={event.prerequisites.map(p => ({
+          prerequisiteId: p.prerequisiteId,
+          courseCode:     p.prerequisite.courseCode,
+          title:          p.prerequisite.title,
+          isHard:         p.isHard,
+        }))}
+        canEdit={canAuthor}
+      />
 
       {/* Gradesheet link */}
-      {event.isGraded && event.gradesheetTemplate && (
+      {event.isGraded && event.gradesheetTemplate && !isStudent && (
         <section className="card flex items-center justify-between gap-4 flex-wrap">
           <div>
             <p className="text-sm font-semibold text-tps-navy">Graded Event</p>
@@ -220,7 +229,7 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
         </section>
       )}
 
-      {/* Lesson editor — instructors only */}
+      {/* Course-level editor — scoped authority only */}
       {canAuthor && (
         <section>
           <LessonEditor
@@ -234,13 +243,6 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
             }}
           />
         </section>
-      )}
-
-      {/* Not yet authored */}
-      {!lesson && !canAuthor && (
-        <div className="card text-center py-10 text-gray-400 text-sm">
-          Lesson content has not been posted yet.
-        </div>
       )}
     </div>
   )

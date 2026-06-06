@@ -88,7 +88,10 @@ export async function advanceContentAction(
   try {
     const user = await requireAnyPermission(['review:content', 'manage:content_vault'])
 
-    const content = await db.contentFile.findUniqueOrThrow({ where: { id: contentId } })
+    const content = await db.contentFile.findUniqueOrThrow({
+      where:   { id: contentId },
+      include: { syllabusEvent: { select: { deptCode: true } } },
+    })
 
     const TRANSITIONS: Record<ContentStatus, ContentStatus | null> = {
       SANDBOX:        'PENDING_CHAIR',
@@ -99,9 +102,11 @@ export async function advanceContentAction(
     }
 
     const { role } = user
+    const isAnCfContent = content.syllabusEvent?.deptCode === 'AN' || content.syllabusEvent?.deptCode === 'CF'
     const canAdvance =
       role === 'SYSTEM_ADMIN' || role === 'A9_STANDARDS' ||
-      (role === 'DEPT_CHAIR' && content.status === 'SANDBOX')
+      (role === 'DEPT_CHAIR' && content.status === 'SANDBOX') ||
+      ((role === 'ADO' || role === 'DO') && content.status === 'SANDBOX' && isAnCfContent)
     if (!canAdvance) return { ok: false, error: 'Insufficient permissions for this transition.' }
 
     const nextStatus = TRANSITIONS[content.status]
@@ -129,6 +134,35 @@ export async function advanceContentAction(
       where: { contentFileId: contentId },
       data:  updateData,
     })
+
+    // A9 approval → notify students of the class the content is for
+    if (nextStatus === 'VAULT' && content.syllabusEventId) {
+      const event = await db.syllabusEvent.findUnique({
+        where:  { id: content.syllabusEventId },
+        select: { courseCode: true, title: true, tracks: true },
+      })
+      if (event) {
+        const students = await db.student.findMany({
+          where: {
+            userId: { not: null },
+            track:  { in: event.tracks },
+            class:  { isActive: true, archivedAt: null },
+          },
+          select: { userId: true },
+        })
+        if (students.length > 0) {
+          await db.notification.createMany({
+            data: students.map(s => ({
+              userId: s.userId!,
+              title:  `New content available for ${event.courseCode}`,
+              body:   `"${content.title}" has been approved and is now available on the ${event.courseCode} — ${event.title} course page.`,
+              href:   `/portal/lessons/${encodeURIComponent(event.courseCode)}`,
+            })),
+          })
+        }
+        revalidatePath(`/portal/lessons/${event.courseCode}`)
+      }
+    }
 
     revalidatePath('/portal/vault')
     return { ok: true }

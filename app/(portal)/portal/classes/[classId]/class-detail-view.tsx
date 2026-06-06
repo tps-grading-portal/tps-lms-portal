@@ -3,11 +3,20 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { addStudentAction, updateClassAction, archiveClassAction } from '../actions'
+import { addStudentAction, updateClassAction, archiveClassAction, createStudentLoginAction } from '../actions'
 import type { Track, Concentration } from '@prisma/client'
 
 const TRACK_LABELS: Record<Track, string> = {
   PILOT: 'Pilot', RPA: 'RPA', FTE: 'FTE', OPERATOR: 'STC', CSO_WSO: 'CSO/WSO', ABM: 'ABM',
+}
+
+function generatePassword(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%'
+  let pw = ''
+  const arr = new Uint32Array(16)
+  crypto.getRandomValues(arr)
+  for (const n of arr) pw += chars[n % chars.length]
+  return pw
 }
 
 type StudentRow = {
@@ -17,6 +26,7 @@ type StudentRow = {
   lastName:     string
   email:        string | null
   track:        Track
+  hasLogin:     boolean
   gradedCount:  number
   totalEntries: number
   avgScore:     number | null
@@ -40,11 +50,14 @@ function AddStudentModal({ classId, onClose }: { classId: string; onClose: () =>
   const router = useRouter()
   const [pending, startTx] = useTransition()
   const [error,   setError] = useState<string | null>(null)
+  const [created, setCreated] = useState<{ email: string; password: string } | null>(null)
 
-  const [firstName, setFirstName] = useState('')
-  const [lastName,  setLastName]  = useState('')
-  const [email,     setEmail]     = useState('')
-  const [track,     setTrack]     = useState<Track>('PILOT')
+  const [firstName,   setFirstName]   = useState('')
+  const [lastName,    setLastName]    = useState('')
+  const [email,       setEmail]       = useState('')
+  const [track,       setTrack]       = useState<Track>('PILOT')
+  const [createLogin, setCreateLogin] = useState(true)
+  const [password,    setPassword]    = useState(generatePassword())
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -55,16 +68,49 @@ function AddStudentModal({ classId, onClose }: { classId: string; onClose: () =>
         email: email || null,
         track,
         number: null, // auto-assign
+        createLogin,
+        password: createLogin ? password : null,
       })
       if ('error' in result) { setError(result.error ?? 'Failed'); return }
       router.refresh()
-      onClose()
+      if (createLogin) {
+        setCreated({ email: email.trim().toLowerCase(), password })
+      } else {
+        onClose()
+      }
     })
+  }
+
+  // Show credentials once after creating a login
+  if (created) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+        <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
+          <h3 className="font-bold text-tps-navy">Student Added</h3>
+          <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+            Portal login created. Share these credentials securely — the password is not shown again.
+          </div>
+          <div className="bg-gray-50 rounded-lg p-4 font-mono text-sm space-y-1">
+            <p><span className="text-gray-400">Email:</span> {created.email}</p>
+            <p><span className="text-gray-400">Password:</span> {created.password}</p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => navigator.clipboard?.writeText(`Email: ${created.email}\nPassword: ${created.password}`)}
+              className="btn-secondary text-sm px-4 py-2"
+            >
+              Copy Credentials
+            </button>
+            <button onClick={onClose} className="btn-primary text-sm px-4 py-2">Done</button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl" onClick={e => e.stopPropagation()}>
+      <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-tps-navy">Add Student</h3>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
@@ -83,7 +129,7 @@ function AddStudentModal({ classId, onClose }: { classId: string; onClose: () =>
           </div>
 
           <div>
-            <label className="field-label">Email</label>
+            <label className="field-label">Email{createLogin && ' *'}</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="field-input" placeholder="name@us.af.mil" disabled={pending} />
           </div>
 
@@ -96,10 +142,36 @@ function AddStudentModal({ classId, onClose }: { classId: string; onClose: () =>
             </select>
           </div>
 
+          {/* Portal login */}
+          <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={createLogin}
+                onChange={e => setCreateLogin(e.target.checked)}
+                className="rounded border-gray-300 text-tps-orange focus:ring-tps-orange"
+                disabled={pending}
+              />
+              <span className="text-sm font-medium text-gray-700">Create portal login</span>
+            </label>
+            {createLogin && (
+              <div>
+                <label className="field-label">Initial Password</label>
+                <div className="flex gap-2">
+                  <input value={password} onChange={e => setPassword(e.target.value)} className="field-input flex-1 font-mono text-sm" disabled={pending} />
+                  <button type="button" onClick={() => setPassword(generatePassword())} className="btn-secondary text-xs px-3" disabled={pending}>
+                    Regenerate
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
 
           <p className="text-xs text-gray-400">
-            Gradesheet entries for the student&apos;s track are generated automatically.
+            The class assignment dictates the student&apos;s curriculum — their full
+            {' '}track roadmap and gradesheets are provisioned automatically.
           </p>
 
           <button type="submit" disabled={pending || !firstName.trim() || !lastName.trim()} className="btn-primary w-full text-sm py-2.5">
@@ -107,6 +179,80 @@ function AddStudentModal({ classId, onClose }: { classId: string; onClose: () =>
           </button>
         </div>
       </form>
+    </div>
+  )
+}
+
+// ── Create login for existing student ─────────────────────────────────────────
+
+function CreateLoginModal({ student, onClose }: { student: StudentRow; onClose: () => void }) {
+  const router = useRouter()
+  const [pending, startTx] = useTransition()
+  const [error,   setError] = useState<string | null>(null)
+  const [done,    setDone]  = useState(false)
+  const [password] = useState(generatePassword())
+
+  function handleCreate() {
+    setError(null)
+    startTx(async () => {
+      const result = await createStudentLoginAction(student.id, password)
+      if ('error' in result) { setError(result.error ?? 'Failed'); return }
+      setDone(true)
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-tps-navy">Portal Login — {student.firstName} {student.lastName}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+
+        {done ? (
+          <>
+            <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+              Login created. Share securely — the password is not shown again.
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4 font-mono text-sm space-y-1">
+              <p><span className="text-gray-400">Email:</span> {student.email}</p>
+              <p><span className="text-gray-400">Password:</span> {password}</p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => navigator.clipboard?.writeText(`Email: ${student.email}\nPassword: ${password}`)}
+                className="btn-secondary text-sm px-4 py-2"
+              >
+                Copy Credentials
+              </button>
+              <button onClick={onClose} className="btn-primary text-sm px-4 py-2">Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            {student.email ? (
+              <p className="text-sm text-gray-600">
+                Create a portal login for <strong>{student.email}</strong>?
+                A password will be generated and shown once. Their curriculum
+                will be backfilled if missing.
+              </p>
+            ) : (
+              <p className="text-sm text-amber-700">
+                This student has no email — add one via Edit on their profile first.
+              </p>
+            )}
+            {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
+            <button
+              onClick={handleCreate}
+              disabled={pending || !student.email}
+              className="btn-primary w-full text-sm py-2.5"
+            >
+              {pending ? 'Creating…' : 'Create Login'}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -203,6 +349,7 @@ function ClassSettingsModal({ cls, onClose }: { cls: ClassInfo; onClose: () => v
 export function ClassDetailView({ cls, students }: { cls: ClassInfo; students: StudentRow[] }) {
   const [addOpen,      setAddOpen]      = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [loginFor,     setLoginFor]     = useState<StudentRow | null>(null)
   const [trackFilter,  setTrackFilter]  = useState<Track | 'all'>('all')
   const [search,       setSearch]       = useState('')
 
@@ -310,6 +457,7 @@ export function ClassDetailView({ cls, students }: { cls: ClassInfo; students: S
                 <th className="text-left px-4 py-3 font-semibold text-gray-700 w-14">#</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Name</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Track</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700">Login</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-700">Progress</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-700">Avg Score</th>
                 <th className="px-4 py-3 w-10"></th>
@@ -331,6 +479,20 @@ export function ClassDetailView({ cls, students }: { cls: ClassInfo; students: S
                     <span className="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-tps-navy/10 text-tps-navy">
                       {TRACK_LABELS[s.track]}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {s.hasLogin ? (
+                      <span className="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-700">
+                        Active
+                      </span>
+                    ) : (
+                      <button
+                        onClick={e => { e.stopPropagation(); setLoginFor(s) }}
+                        className="text-xs text-tps-blue hover:underline font-medium"
+                      >
+                        Create login
+                      </button>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right text-gray-500 text-xs tabular-nums">
                     {s.gradedCount}/{s.totalEntries} graded
@@ -361,6 +523,7 @@ export function ClassDetailView({ cls, students }: { cls: ClassInfo; students: S
       {/* Modals */}
       {addOpen      && <AddStudentModal classId={cls.id} onClose={() => setAddOpen(false)} />}
       {settingsOpen && <ClassSettingsModal cls={cls} onClose={() => setSettingsOpen(false)} />}
+      {loginFor     && <CreateLoginModal student={loginFor} onClose={() => setLoginFor(null)} />}
     </div>
   )
 }

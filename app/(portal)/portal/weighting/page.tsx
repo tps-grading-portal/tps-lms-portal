@@ -12,7 +12,7 @@ export default async function WeightingPage() {
   if (!session?.user) redirect('/login')
   if (!can(session.user.role, 'manage:weighting_matrix')) return null
 
-  const { events, weightMap } = await getWeightingMatrixData()
+  const { events, catalog, weightMap } = await getWeightingMatrixData()
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -24,7 +24,7 @@ export default async function WeightingPage() {
         </p>
       </div>
 
-      <WeightingMatrix events={events} weightMap={weightMap} />
+      <WeightingMatrix events={events} catalog={catalog} weightMap={weightMap} />
     </div>
   )
 }

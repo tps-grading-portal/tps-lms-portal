@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
-import type { ChannelSummary } from './actions'
-import { sendMessageAction } from './actions'
+import type { ChannelSummary, ChatAttachment } from './actions'
+import { sendMessageAction, uploadChatAttachmentAction } from './actions'
 import type { UserRole } from '@prisma/client'
 
 type RawMessage = {
@@ -10,12 +10,55 @@ type RawMessage = {
   content:   string
   sentAt:    string
   editedAt?: string | null
+  attachments?: ChatAttachment[] | null
   author: {
     id:        string
     firstName: string
     lastName:  string
     role:      UserRole
   }
+}
+
+// ── Attachment rendering ──────────────────────────────────────────────────────
+
+function fmtBytes(n: number) {
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+function AttachmentView({ attachments, onDark }: { attachments: ChatAttachment[]; onDark: boolean }) {
+  return (
+    <div className="space-y-1.5 mt-1">
+      {attachments.map((a, i) =>
+        a.mimeType.startsWith('image/') ? (
+          <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="block">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={a.url}
+              alt={a.name}
+              className="max-w-full max-h-64 rounded-lg border border-black/10"
+            />
+          </a>
+        ) : (
+          <a
+            key={i}
+            href={a.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs transition-colors ${
+              onDark
+                ? 'bg-white/10 hover:bg-white/20 text-white'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+            }`}
+          >
+            <span className="text-base">📎</span>
+            <span className="truncate flex-1 font-medium">{a.name}</span>
+            <span className={onDark ? 'text-white/50' : 'text-gray-400'}>{fmtBytes(a.sizeBytes)}</span>
+          </a>
+        ),
+      )}
+    </div>
+  )
 }
 
 const ROLE_BADGE: Partial<Record<UserRole, string>> = {
@@ -50,11 +93,16 @@ function MessageBubble({ msg, isOwn }: { msg: RawMessage; isOwn: boolean }) {
   const badge   = ROLE_BADGE[msg.author.role]
   const roleStr = ROLE_SHORT[msg.author.role] ?? msg.author.role
 
+  const atts = msg.attachments ?? []
+
   if (isOwn) {
     return (
       <div className="flex flex-col items-end gap-0.5">
         <div className="max-w-[80%] bg-tps-navy text-white rounded-2xl rounded-br-sm px-3.5 py-2 shadow-sm">
-          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
+          {msg.content && (
+            <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
+          )}
+          {atts.length > 0 && <AttachmentView attachments={atts} onDark />}
         </div>
         <span className="text-[10px] text-gray-400 px-1">{time}</span>
       </div>
@@ -72,7 +120,10 @@ function MessageBubble({ msg, isOwn }: { msg: RawMessage; isOwn: boolean }) {
         )}
       </div>
       <div className="max-w-[80%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-3.5 py-2 shadow-sm">
-        <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-gray-800">{msg.content}</p>
+        {msg.content && (
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-gray-800">{msg.content}</p>
+        )}
+        {atts.length > 0 && <AttachmentView attachments={atts} onDark={false} />}
       </div>
       <span className="text-[10px] text-gray-400 px-1">{time}</span>
     </div>
@@ -128,10 +179,14 @@ function MessageInput({
   onSend,
   disabled,
 }: {
-  onSend: (text: string) => void
+  onSend: (text: string, attachments: ChatAttachment[]) => void
   disabled: boolean
 }) {
   const [text, setText] = useState('')
+  const [pendingFiles, setPendingFiles] = useState<ChatAttachment[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -142,38 +197,104 @@ function MessageInput({
 
   function submit() {
     const trimmed = text.trim()
-    if (!trimmed || disabled) return
-    onSend(trimmed)
+    if ((!trimmed && pendingFiles.length === 0) || disabled || uploading) return
+    onSend(trimmed, pendingFiles)
     setText('')
+    setPendingFiles([])
+  }
+
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setUploadError(null)
+    setUploading(true)
+    try {
+      for (const file of Array.from(files).slice(0, 5)) {
+        const fd = new FormData()
+        fd.set('file', file)
+        const result = await uploadChatAttachmentAction(fd)
+        if (result.ok) {
+          setPendingFiles(prev => [...prev, result.attachment])
+        } else {
+          setUploadError(result.error)
+        }
+      }
+    } finally {
+      setUploading(false)
+    }
   }
 
   return (
-    <div className="border-t border-gray-200 bg-white px-4 py-3 flex items-end gap-2">
-      <textarea
-        value={text}
-        onChange={e => setText(e.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={disabled}
-        rows={1}
-        placeholder="Message… (Enter to send, Shift+Enter for newline)"
-        className="flex-1 resize-none rounded-xl border border-gray-300 px-3 py-2.5 text-sm
-                   focus:outline-none focus:ring-2 focus:ring-tps-navy/30 focus:border-tps-navy
-                   disabled:bg-gray-50 disabled:text-gray-400
-                   max-h-32 overflow-y-auto"
-        style={{ minHeight: '44px' }}
-      />
-      <button
-        type="button"
-        onClick={submit}
-        disabled={disabled || !text.trim()}
-        className="min-h-[44px] min-w-[44px] rounded-xl bg-tps-navy text-white flex items-center justify-center
-                   hover:bg-tps-navy/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        aria-label="Send message"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-        </svg>
-      </button>
+    <div className="border-t border-gray-200 bg-white px-4 py-3 space-y-2">
+      {/* Pending attachments */}
+      {(pendingFiles.length > 0 || uploadError) && (
+        <div className="flex flex-wrap gap-2 items-center">
+          {pendingFiles.map((f, i) => (
+            <span key={i} className="inline-flex items-center gap-1.5 text-xs bg-gray-100 rounded-lg px-2.5 py-1.5">
+              {f.mimeType.startsWith('image/') ? '🖼' : '📎'} {f.name}
+              <button
+                onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))}
+                className="text-gray-400 hover:text-red-500 leading-none"
+              >×</button>
+            </span>
+          ))}
+          {uploadError && <span className="text-xs text-red-600">{uploadError}</span>}
+        </div>
+      )}
+
+      <div className="flex items-end gap-2">
+        {/* Attach */}
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.ppt,.pptx,.xls,.xlsx,.doc,.docx,.txt,.csv,.zip,.mp4"
+          className="hidden"
+          onChange={e => { handleFiles(e.target.files); e.target.value = '' }}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={disabled || uploading}
+          className="min-h-[44px] min-w-[44px] rounded-xl border border-gray-300 text-gray-500 flex items-center justify-center
+                     hover:border-tps-navy hover:text-tps-navy disabled:opacity-40 transition-colors"
+          aria-label="Attach file"
+          title="Attach image or file"
+        >
+          {uploading ? (
+            <span className="text-xs">…</span>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+            </svg>
+          )}
+        </button>
+
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
+          rows={1}
+          placeholder="Message… (Enter to send, Shift+Enter for newline)"
+          className="flex-1 resize-none rounded-xl border border-gray-300 px-3 py-2.5 text-sm
+                     focus:outline-none focus:ring-2 focus:ring-tps-navy/30 focus:border-tps-navy
+                     disabled:bg-gray-50 disabled:text-gray-400
+                     max-h-32 overflow-y-auto"
+          style={{ minHeight: '44px' }}
+        />
+        <button
+          type="button"
+          onClick={submit}
+          disabled={disabled || uploading || (!text.trim() && pendingFiles.length === 0)}
+          className="min-h-[44px] min-w-[44px] rounded-xl bg-tps-navy text-white flex items-center justify-center
+                     hover:bg-tps-navy/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          aria-label="Send message"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+          </svg>
+        </button>
+      </div>
     </div>
   )
 }
@@ -251,10 +372,10 @@ export function ChatShell({ channels, currentUserId, className }: Props) {
 
   // ── Send message ──────────────────────────────────────────────────────────
 
-  function handleSend(text: string) {
+  function handleSend(text: string, attachments: ChatAttachment[]) {
     setSendError(null)
     startSend(async () => {
-      const result = await sendMessageAction(activeChannelId, text)
+      const result = await sendMessageAction(activeChannelId, text, attachments)
       if (!result.ok) {
         setSendError(result.error ?? 'Failed to send')
         return

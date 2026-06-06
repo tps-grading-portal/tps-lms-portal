@@ -16,12 +16,15 @@ datasource db {
 // ============================================================
 
 enum UserRole {
-  SYSTEM_ADMIN    // Full CRUD, impersonation, inline editing
-  DEAN_COMMANDER  // Strategic oversight, owns weighting matrix
-  A9_STANDARDS    // Content vault gatekeeper, survey anonymity shield
-  DEPT_CHAIR      // Tactical oversight, dept-scoped analytics
-  LINE_INSTRUCTOR // Grade entry, restricted analytics
-  STUDENT         // Syllabus roadmap, own gradebook view
+  SYSTEM_ADMIN     // Full CRUD, impersonation, inline editing
+  DEAN_COMMANDER   // Strategic oversight, owns weighting matrix
+  A9_STANDARDS     // Content vault gatekeeper, survey anonymity shield
+  DEPT_CHAIR       // Tactical oversight, dept-scoped analytics
+  ADO              // Assistant Director of Operations — AN/CF authority
+  DO               // Director of Operations — AN/CF authority + schedule confirm
+  LINE_INSTRUCTOR  // Grade entry, restricted analytics
+  GUEST_INSTRUCTOR // Scoped to assigned courses only
+  STUDENT          // Syllabus roadmap, own gradebook view
 }
 
 enum Concentration {
@@ -240,6 +243,13 @@ model User {
   // Academic scheduling (as assigned instructor)
   scheduledEvents     ClassSyllabusSchedule[] @relation("ScheduleInstructor")
 
+  // Course ownership / phase assignments
+  courseAssignments     CourseAssignment[] @relation("AssignmentUser")
+  assignmentsMade       CourseAssignment[] @relation("AssignmentAssigner")
+
+  // Notifications
+  notifications       Notification[]
+
   // System admin actions
   auditLogs          AuditLog[]
 
@@ -269,6 +279,42 @@ model UserTrackAccess {
 
   @@unique([userId, track])
   @@map("user_track_access")
+}
+
+// Course Owner / Phase assignment — who looks after which MCG content.
+// Exactly one of syllabusEventId (single course) or deptCode (whole phase)
+// is set. assignedById records who made the change (also AuditLog'd).
+model CourseAssignment {
+  id              String          @id @default(cuid())
+  userId          String
+  syllabusEventId String?         // single course ownership
+  deptCode        DepartmentCode? // whole-phase ownership (e.g. all of TF)
+  assignedById    String
+  createdAt       DateTime        @default(now())
+
+  user          User           @relation("AssignmentUser",     fields: [userId],          references: [id], onDelete: Cascade)
+  assignedBy    User           @relation("AssignmentAssigner", fields: [assignedById],    references: [id])
+  syllabusEvent SyllabusEvent? @relation(fields: [syllabusEventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, syllabusEventId])
+  @@unique([userId, deptCode])
+  @@map("course_assignments")
+}
+
+// In-app account notifications (e.g. "new content available for TF 6220")
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  title     String
+  body      String?   @db.Text
+  href      String?   // portal link to open
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
 }
 
 // System admin audit trail
@@ -409,6 +455,7 @@ model SyllabusEvent {
   curriculumWeights CurriculumWeight[]
   surveyDeployments SurveyDeployment[]
   lessonPage       LessonPage?
+  courseAssignments CourseAssignment[]
 
   @@map("syllabus_events")
 }
@@ -610,20 +657,43 @@ model LessonPage {
   syllabusEvent SyllabusEvent      @relation(fields: [syllabusEventId], references: [id], onDelete: Cascade)
   author        User               @relation(fields: [authorId],        references: [id])
   files         LessonPageFile[]
+  lessons       Lesson[]
   studentViews  StudentLessonView[]
 
   @@map("lesson_pages")
 }
 
-// Junction: vault-approved file attached to a lesson page
+// Individual lesson within a course page — a course can hold many
+model Lesson {
+  id           String   @id @default(cuid())
+  lessonPageId String
+  title        String
+  overview     String?  @db.Text
+  outline      String?  @db.Text
+  tlos         Json?    // Terminal Learning Objectives — string[]
+  plos         Json?    // Program Learning Outcomes supported — string[]
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  lessonPage LessonPage       @relation(fields: [lessonPageId], references: [id], onDelete: Cascade)
+  files      LessonPageFile[]
+
+  @@map("lessons")
+}
+
+// Junction: file attached to a course page (lessonId null = course-wide)
+// or to a specific lesson within it
 model LessonPageFile {
   id            String  @id @default(cuid())
   lessonPageId  String
+  lessonId      String? // null = course-wide material
   contentFileId String
   sortOrder     Int     @default(0)
   displayLabel  String?
 
   lessonPage  LessonPage  @relation(fields: [lessonPageId],  references: [id], onDelete: Cascade)
+  lesson      Lesson?     @relation(fields: [lessonId],      references: [id], onDelete: Cascade)
   contentFile ContentFile @relation(fields: [contentFileId], references: [id], onDelete: Cascade)
 
   @@unique([lessonPageId, contentFileId])

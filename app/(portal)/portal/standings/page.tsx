@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { db } from '@/lib/db'
 import { computeStandings } from '@/lib/standings'
 import { StandingsBoard } from './standings-board'
+import { ClassSelector } from '@/components/portal/class-selector'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Class Standings' }
@@ -54,24 +55,7 @@ export default async function StandingsPage({
         </div>
 
         {/* Class selector */}
-        {classes.length > 1 && (
-          <form>
-            <select
-              name="classId"
-              defaultValue={selectedClassId}
-              onChange={e => {
-                const url = new URL(window.location.href)
-                url.searchParams.set('classId', e.target.value)
-                window.location.href = url.toString()
-              }}
-              className="field-select text-sm w-36"
-            >
-              {classes.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </form>
-        )}
+        <ClassSelector classes={classes} selectedClassId={selectedClassId} />
       </div>
 
       {/* Weighting notice if no weights configured */}

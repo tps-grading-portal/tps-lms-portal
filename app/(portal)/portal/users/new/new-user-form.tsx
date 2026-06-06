@@ -5,14 +5,30 @@ import { useRouter } from 'next/navigation'
 import { createUserAction } from '../actions'
 import type { UserRole } from '@prisma/client'
 
+// Students are NOT created here — student access is provisioned from the
+// class roster, which dictates their curriculum.
 const ROLE_OPTIONS: { value: UserRole; label: string; description: string }[] = [
-  { value: 'STUDENT',         label: 'Student',         description: 'Syllabus roadmap, own grades, chat' },
-  { value: 'LINE_INSTRUCTOR', label: 'Line Instructor', description: 'Grade entry, content submission, lessons' },
-  { value: 'DEPT_CHAIR',      label: 'Dept Chair',      description: 'Content review, dept analytics, scheduling' },
-  { value: 'A9_STANDARDS',    label: 'A9 Standards',    description: 'Content vault gatekeeper, survey shield' },
-  { value: 'DEAN_COMMANDER',  label: 'Dean / Commander',description: 'Weighting matrix, standings, strategic view' },
-  { value: 'SYSTEM_ADMIN',    label: 'System Admin',    description: 'Full system access' },
+  { value: 'LINE_INSTRUCTOR',  label: 'Line Instructor',  description: 'Grade entry, content submission, lessons' },
+  { value: 'GUEST_INSTRUCTOR', label: 'Guest Instructor', description: 'Scoped to assigned courses only — content + grading for those events' },
+  { value: 'DEPT_CHAIR',       label: 'Dept Chair',       description: 'Content review, dept analytics — select department(s) below' },
+  { value: 'ADO',              label: 'ADO',              description: 'Assistant Director of Operations — AN/CF authority' },
+  { value: 'DO',               label: 'DO',               description: 'Director of Operations — AN/CF authority + scheduling' },
+  { value: 'A9_STANDARDS',     label: 'A9 Standards',     description: 'Content vault gatekeeper, survey shield' },
+  { value: 'DEAN_COMMANDER',   label: 'Dean / Commander', description: 'Weighting matrix, standings, strategic view' },
+  { value: 'SYSTEM_ADMIN',     label: 'System Admin',     description: 'Full system access' },
 ]
+
+const DEPT_OPTIONS = [
+  { code: 'TF', label: 'Test Foundations' },
+  { code: 'FQ', label: 'Flying Qualities' },
+  { code: 'PF', label: 'Performance' },
+  { code: 'SY', label: 'Mission Systems' },
+  { code: 'AS', label: 'Astro Sciences' },
+  { code: 'CF', label: 'Check Flights' },
+  { code: 'SO', label: 'Space Operations' },
+  { code: 'AN', label: 'Ancillary' },
+  { code: 'TL', label: 'Test Leadership' },
+] as const
 
 function generatePassword(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%'
@@ -32,14 +48,26 @@ export function NewUserForm() {
   const [email,     setEmail]     = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName,  setLastName]  = useState('')
-  const [role,      setRole]      = useState<UserRole>('STUDENT')
+  const [role,      setRole]      = useState<UserRole>('LINE_INSTRUCTOR')
   const [password,  setPassword]  = useState(generatePassword())
+  const [depts,     setDepts]     = useState<string[]>([])
+
+  function toggleDept(code: string) {
+    setDepts(prev => prev.includes(code) ? prev.filter(d => d !== code) : [...prev, code])
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    if (role === 'DEPT_CHAIR' && depts.length === 0) {
+      setError('Select at least one department for a Dept Chair.')
+      return
+    }
     startTx(async () => {
-      const result = await createUserAction({ email, firstName, lastName, role, password })
+      const result = await createUserAction({
+        email, firstName, lastName, role, password,
+        departments: role === 'DEPT_CHAIR' ? depts : [],
+      })
       if ('error' in result) { setError(result.error ?? 'Failed'); return }
       setCreated({ email: email.trim().toLowerCase(), password })
     })
@@ -130,6 +158,35 @@ export function NewUserForm() {
           ))}
         </div>
       </div>
+
+      {/* Department selection — required for Dept Chair */}
+      {role === 'DEPT_CHAIR' && (
+        <div>
+          <label className="field-label">Department(s) *</label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            {DEPT_OPTIONS.map(d => (
+              <label
+                key={d.code}
+                className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border cursor-pointer text-sm transition-colors ${
+                  depts.includes(d.code) ? 'border-tps-orange bg-tps-orange/5' : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={depts.includes(d.code)}
+                  onChange={() => toggleDept(d.code)}
+                  className="rounded border-gray-300 text-tps-orange focus:ring-tps-orange"
+                  disabled={pending}
+                />
+                <span><strong className="font-mono">{d.code}</strong> <span className="text-gray-500 text-xs">{d.label}</span></span>
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400 mt-1">
+            Chair authority (content review, prereq/TLO editing) is scoped to these departments.
+          </p>
+        </div>
+      )}
 
       <div>
         <label className="field-label">Initial Password *</label>

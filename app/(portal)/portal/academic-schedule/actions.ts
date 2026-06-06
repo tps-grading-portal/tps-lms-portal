@@ -60,7 +60,7 @@ export async function getScheduleDataAction(classId?: string) {
   const classes = await db.class.findMany({
     where:   { archivedAt: null },
     orderBy: { name: 'desc' },
-    select:  { id: true, name: true, isActive: true },
+    select:  { id: true, name: true, isActive: true, startDate: true, endDate: true },
   })
 
   const selectedClass = classId
@@ -68,7 +68,11 @@ export async function getScheduleDataAction(classId?: string) {
     : classes.find(c => c.isActive) ?? classes[0]
 
   if (!selectedClass) {
-    return { classes, selectedClassId: null, weeks: [], unscheduled: [], catalog: [], instructors: [], canEdit, studentTrack: null }
+    return {
+      classes: classes.map(c => ({ id: c.id, name: c.name, isActive: c.isActive })),
+      selectedClassId: null, classStartDate: null, classEndDate: null,
+      weeks: [], unscheduled: [], catalog: [], instructors: [], canEdit, studentTrack: null,
+    }
   }
 
   // Student track filter — students only see events for their track
@@ -154,9 +158,11 @@ export async function getScheduleDataAction(classId?: string) {
   const availableCatalog: CatalogEvent[] = catalog.filter(e => !scheduledEventIds.has(e.id))
 
   return {
-    classes,
+    classes: classes.map(c => ({ id: c.id, name: c.name, isActive: c.isActive })),
     selectedClassId: selectedClass.id,
     selectedClassName: selectedClass.name,
+    classStartDate: selectedClass.startDate?.toISOString().slice(0, 10) ?? null,
+    classEndDate:   selectedClass.endDate?.toISOString().slice(0, 10) ?? null,
     weeks: weekRows,
     unscheduled,
     catalog: availableCatalog,
@@ -232,7 +238,116 @@ export async function deleteWeekAction(weekId: string) {
   return { ok: true }
 }
 
-// ── Schedule event CRUD ───────────────────────────────────────────────────────
+// ── Auto-generate weeks from class start → grad date ─────────────────────────
+// Weeks run Monday–Friday, numbered from 0.
+
+function mondayOf(d: Date): Date {
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  const day = date.getUTCDay() // 0=Sun..6=Sat
+  const diff = day === 0 ? -6 : 1 - day
+  date.setUTCDate(date.getUTCDate() + diff)
+  return date
+}
+
+export async function generateWeeksAction(classId: string, startDate: string, gradDate: string) {
+  const user = await requireAuth()
+  if (!can(user.role, 'schedule:academic')) return { error: 'Insufficient permissions' }
+
+  const start = new Date(`${startDate}T00:00:00Z`)
+  const grad  = new Date(`${gradDate}T00:00:00Z`)
+  if (isNaN(start.getTime()) || isNaN(grad.getTime())) return { error: 'Invalid dates.' }
+  if (grad <= start) return { error: 'Graduation date must be after the start date.' }
+
+  const totalWeeks = Math.ceil((grad.getTime() - mondayOf(start).getTime()) / (7 * 86400_000))
+  if (totalWeeks > 80) return { error: 'That range generates more than 80 weeks — check the dates.' }
+
+  const existing = await db.academicWeek.findMany({
+    where:  { classId },
+    select: { weekNumber: true },
+  })
+  const existingNums = new Set(existing.map(w => w.weekNumber))
+
+  const monday0 = mondayOf(start)
+  const rows = []
+  for (let n = 0; n <= totalWeeks; n++) {
+    if (existingNums.has(n)) continue
+    const monday = new Date(monday0)
+    monday.setUTCDate(monday.getUTCDate() + n * 7)
+    if (monday > grad) break
+    const friday = new Date(monday)
+    friday.setUTCDate(friday.getUTCDate() + 4)
+    rows.push({
+      classId,
+      weekNumber: n,
+      label:      `Week ${n}`,
+      startDate:  monday,
+      endDate:    friday,
+    })
+  }
+
+  if (rows.length > 0) await db.academicWeek.createMany({ data: rows })
+
+  // Persist class dates while we're at it
+  await db.class.update({
+    where: { id: classId },
+    data:  { startDate: start, endDate: grad },
+  })
+
+  revalidatePath('/portal/academic-schedule')
+  return { ok: true, created: rows.length }
+}
+
+// ── Schedule event CRUD (with overlap detection + override) ──────────────────
+
+function toMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number)
+  return h * 60 + (m || 0)
+}
+
+export type ScheduleConflict = {
+  courseCode: string
+  title:      string
+  time:       string
+}
+
+async function findConflicts(
+  classId: string,
+  excludeEventId: string,
+  dateISO: string,
+  time: string,
+  durationMinutes: number,
+): Promise<ScheduleConflict[]> {
+  const dayStart = new Date(`${dateISO}T00:00:00Z`)
+  const dayEnd   = new Date(`${dateISO}T23:59:59Z`)
+
+  const sameDay = await db.classSyllabusSchedule.findMany({
+    where: {
+      classId,
+      syllabusEventId: { not: excludeEventId },
+      scheduledDate:   { gte: dayStart, lte: dayEnd },
+      scheduledTime:   { not: null },
+    },
+    include: { syllabusEvent: { select: { courseCode: true, title: true } } },
+  })
+
+  const startA = toMinutes(time)
+  const endA   = startA + durationMinutes
+
+  const conflicts: ScheduleConflict[] = []
+  for (const s of sameDay) {
+    if (!s.scheduledTime) continue
+    const startB = toMinutes(s.scheduledTime)
+    const endB   = startB + (s.durationMinutes ?? 60)
+    if (startA < endB && startB < endA) {
+      conflicts.push({
+        courseCode: s.syllabusEvent.courseCode,
+        title:      s.syllabusEvent.title,
+        time:       `${s.scheduledTime} (${s.durationMinutes ?? 60} min)`,
+      })
+    }
+  }
+  return conflicts
+}
 
 export async function scheduleEventAction(classId: string, syllabusEventId: string, data: {
   academicWeekId:  string | null
@@ -241,14 +356,38 @@ export async function scheduleEventAction(classId: string, syllabusEventId: stri
   scheduledTime:   string | null  // HH:MM
   durationMinutes: number | null
   locationRoom:    string | null
+  override?:       boolean        // schedule despite conflicts
 }) {
   const user = await requireAuth()
   if (!can(user.role, 'schedule:academic')) return { error: 'Insufficient permissions' }
 
+  // Overlap check — same class, same day, overlapping time window
+  if (data.scheduledDate && data.scheduledTime && !data.override) {
+    const conflicts = await findConflicts(
+      classId, syllabusEventId,
+      data.scheduledDate, data.scheduledTime,
+      data.durationMinutes ?? 60,
+    )
+    if (conflicts.length > 0) {
+      return { conflicts }
+    }
+  }
+
+  // Auto-assign the week containing the scheduled date if not set
+  let academicWeekId = data.academicWeekId
+  if (!academicWeekId && data.scheduledDate) {
+    const d = new Date(`${data.scheduledDate}T12:00:00Z`)
+    const week = await db.academicWeek.findFirst({
+      where: { classId, startDate: { lte: d }, endDate: { gte: d } },
+      select: { id: true },
+    })
+    academicWeekId = week?.id ?? null
+  }
+
   await db.classSyllabusSchedule.upsert({
     where:  { classId_syllabusEventId: { classId, syllabusEventId } },
     update: {
-      academicWeekId:  data.academicWeekId,
+      academicWeekId,
       instructorId:    data.instructorId,
       scheduledDate:   data.scheduledDate ? new Date(data.scheduledDate) : null,
       scheduledTime:   data.scheduledTime,
@@ -258,12 +397,57 @@ export async function scheduleEventAction(classId: string, syllabusEventId: stri
     create: {
       classId,
       syllabusEventId,
-      academicWeekId:  data.academicWeekId,
+      academicWeekId,
       instructorId:    data.instructorId,
       scheduledDate:   data.scheduledDate ? new Date(data.scheduledDate) : null,
       scheduledTime:   data.scheduledTime,
       durationMinutes: data.durationMinutes,
       locationRoom:    data.locationRoom,
+    },
+  })
+
+  revalidatePath('/portal/academic-schedule')
+  return { ok: true }
+}
+
+// Quick reschedule used by the visual calendar (drag/resize)
+export async function moveScheduledEventAction(scheduleId: string, data: {
+  scheduledDate:   string
+  scheduledTime:   string
+  durationMinutes: number
+  override?:       boolean
+}) {
+  const user = await requireAuth()
+  if (!can(user.role, 'schedule:academic')) return { error: 'Insufficient permissions' }
+
+  const existing = await db.classSyllabusSchedule.findUnique({
+    where:  { id: scheduleId },
+    select: { classId: true, syllabusEventId: true },
+  })
+  if (!existing) return { error: 'Scheduled event not found.' }
+
+  if (!data.override) {
+    const conflicts = await findConflicts(
+      existing.classId, existing.syllabusEventId,
+      data.scheduledDate, data.scheduledTime, data.durationMinutes,
+    )
+    if (conflicts.length > 0) return { conflicts }
+  }
+
+  // Keep week assignment in sync with the new date
+  const d = new Date(`${data.scheduledDate}T12:00:00Z`)
+  const week = await db.academicWeek.findFirst({
+    where:  { classId: existing.classId, startDate: { lte: d }, endDate: { gte: d } },
+    select: { id: true },
+  })
+
+  await db.classSyllabusSchedule.update({
+    where: { id: scheduleId },
+    data: {
+      scheduledDate:   new Date(data.scheduledDate),
+      scheduledTime:   data.scheduledTime,
+      durationMinutes: data.durationMinutes,
+      academicWeekId:  week?.id ?? null,
     },
   })
 
