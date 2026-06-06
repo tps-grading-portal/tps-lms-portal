@@ -8,9 +8,9 @@ export const metadata: Metadata = { title: 'Grading Queue' }
 export default async function GradePage() {
   await requirePermission('grade:enter')
 
-  const { entries, className, classId } = await getGradeQueueAction()
+  const { entries, classNames } = await getGradeQueueAction()
 
-  if (!classId) {
+  if (classNames.length === 0) {
     return (
       <div className="max-w-4xl mx-auto">
         <h1 className="text-2xl font-bold text-tps-navy mb-1">Grading Queue</h1>
@@ -27,12 +27,13 @@ export default async function GradePage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-tps-navy">Grading Queue</h1>
         <p className="text-gray-500 text-sm">
-          Class {className} · {entries.length} grade sheet{entries.length !== 1 ? 's' : ''}
+          {classNames.length === 1 ? `Class ${classNames[0]}` : `Classes ${classNames.join(', ')}`}
+          {' '}· {entries.length} grade sheet{entries.length !== 1 ? 's' : ''}
           {' '}· Tap &quot;Grade&quot; or scan QR code to open on any device
         </p>
       </div>
 
-      <GradeQueue entries={entries} className={className ?? ''} />
+      <GradeQueue entries={entries} />
     </div>
   )
 }

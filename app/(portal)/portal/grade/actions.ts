@@ -12,9 +12,12 @@ import type { Track } from '@prisma/client'
 
 export type GradeQueueEntry = {
   entryId:        string
+  classId:        string
+  className:      string
   studentId:      string
   studentNumber:  number
   studentName:    string
+  studentSortKey: string
   track:          Track
   templateId:     string
   templateTitle:  string
@@ -27,47 +30,49 @@ export type GradeQueueEntry = {
 
 export async function getGradeQueueAction(): Promise<{
   entries: GradeQueueEntry[]
-  className: string | null
-  classId: string | null
+  classNames: string[]
 }> {
   await requireAuth()
 
-  const activeClass = await db.class.findFirst({
-    where:  { isActive: true },
-    select: { id: true, name: true },
-    orderBy: { createdAt: 'desc' },
+  const activeClasses = await db.class.findMany({
+    where:   { isActive: true, archivedAt: null },
+    select:  { id: true, name: true },
+    orderBy: { name: 'asc' },
   })
-  if (!activeClass) return { entries: [], className: null, classId: null }
+  if (activeClasses.length === 0) return { entries: [], classNames: [] }
 
   const entries = await db.gradebookEntry.findMany({
-    where: { student: { classId: activeClass.id } },
+    where: { student: { classId: { in: activeClasses.map(c => c.id) } } },
     include: {
-      student:  { select: { id: true, number: true, firstName: true, lastName: true, track: true } },
+      student: {
+        select: {
+          id: true, number: true, firstName: true, lastName: true, track: true,
+          class: { select: { id: true, name: true } },
+        },
+      },
       template: { select: { id: true, title: true, courseCode: true } },
     },
-    orderBy: [
-      { status: 'asc' },
-      { student: { number: 'asc' } },
-    ],
   })
 
   return {
     entries: entries.map((e) => ({
-      entryId:       e.id,
-      studentId:     e.student.id,
-      studentNumber: e.student.number,
-      studentName:   `${e.student.firstName} ${e.student.lastName}`.trim() || `Student ${e.student.number}`,
-      track:         e.student.track,
-      templateId:    e.template.id,
-      templateTitle: e.template.title,
-      courseCode:    e.template.courseCode,
-      status:        e.status,
-      submittedAt:   e.submittedAt,
-      overallScore:  e.overallScore,
-      overallPass:   e.overallPass,
+      entryId:        e.id,
+      classId:        e.student.class.id,
+      className:      e.student.class.name,
+      studentId:      e.student.id,
+      studentNumber:  e.student.number,
+      studentName:    `${e.student.firstName} ${e.student.lastName}`.trim() || `Student ${e.student.number}`,
+      studentSortKey: `${e.student.lastName} ${e.student.firstName}`.trim().toLowerCase() || `zz-${e.student.number}`,
+      track:          e.student.track,
+      templateId:     e.template.id,
+      templateTitle:  e.template.title,
+      courseCode:     e.template.courseCode,
+      status:         e.status,
+      submittedAt:    e.submittedAt,
+      overallScore:   e.overallScore,
+      overallPass:    e.overallPass,
     })),
-    className: activeClass.name,
-    classId:   activeClass.id,
+    classNames: activeClasses.map(c => c.name),
   }
 }
 

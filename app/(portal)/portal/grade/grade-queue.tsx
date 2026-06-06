@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
+import { deptFromCourseCode, deptSortIndex, deptLabel } from '@/lib/mcg-departments'
 import type { GradeQueueEntry } from './actions'
 import type { Track } from '@prisma/client'
 
@@ -20,6 +21,10 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   SUBMITTED:   { label: 'Submitted',   color: 'bg-green-100 text-green-700' },
 }
 
+type Filter = 'all' | 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED'
+
+// ── QR modal ──────────────────────────────────────────────────────────────────
+
 function QrModal({ entryId, label, onClose }: { entryId: string; label: string; onClose: () => void }) {
   const url = typeof window !== 'undefined'
     ? `${window.location.origin}/portal/grade/${entryId}`
@@ -33,7 +38,6 @@ function QrModal({ entryId, label, onClose }: { entryId: string; label: string; 
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
         </div>
 
-        {/* QR code rendered server-side via img tag pointing to API route */}
         <div className="flex justify-center mb-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -56,27 +60,235 @@ function QrModal({ entryId, label, onClose }: { entryId: string; label: string; 
   )
 }
 
-type Filter = 'all' | 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED'
+// ── Gradesheet row (leaf) ─────────────────────────────────────────────────────
 
-export function GradeQueue({ entries }: { entries: GradeQueueEntry[]; className: string }) {
-  const [filter,     setFilter]     = useState<Filter>('all')
-  const [qrEntryId,  setQrEntryId]  = useState<string | null>(null)
-  const [search,     setSearch]     = useState('')
+function SheetRow({ entry, onQr }: { entry: GradeQueueEntry; onQr: () => void }) {
+  const meta = STATUS_META[entry.status] ?? STATUS_META.NOT_STARTED
+  return (
+    <div className="flex items-center gap-3 py-2 pl-4 pr-2 border-b border-gray-50 last:border-0 hover:bg-gray-50/60 transition-colors">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-bold bg-tps-navy/10 text-tps-navy px-1.5 py-0.5 rounded font-mono">
+            {entry.courseCode}
+          </span>
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${meta.color}`}>
+            {meta.label}
+          </span>
+        </div>
+        <p className="text-xs text-gray-500 truncate mt-0.5">{entry.templateTitle}</p>
+        {entry.overallScore !== null && (
+          <p className="text-xs font-semibold mt-0.5 text-tps-navy tabular-nums">
+            {entry.overallScore.toFixed(1)}%
+            {entry.overallPass !== null && (
+              <span className={entry.overallPass ? ' text-green-600' : ' text-red-600'}>
+                {' '}({entry.overallPass ? 'Pass' : 'Fail'})
+              </span>
+            )}
+          </p>
+        )}
+      </div>
 
-  const filtered = entries.filter(e => {
-    if (filter !== 'all' && e.status !== filter) return false
-    if (search && !e.studentName.toLowerCase().includes(search.toLowerCase()) &&
-        !e.courseCode.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
+      <div className="flex gap-1.5 shrink-0">
+        <Link
+          href={`/portal/grade/${entry.entryId}`}
+          className="btn-primary text-xs px-3 py-1.5 text-center"
+        >
+          {entry.status === 'NOT_STARTED' ? 'Grade' : 'Edit'}
+        </Link>
+        <button onClick={onQr} className="btn-secondary text-xs px-2.5 py-1.5" title="Show QR code">
+          QR
+        </button>
+      </div>
+    </div>
+  )
+}
 
-  const qrEntry = qrEntryId ? entries.find(e => e.entryId === qrEntryId) : null
+// ── Department group within a student ─────────────────────────────────────────
+
+function DeptGroup({
+  dept, entries, expanded, onToggle, onQr,
+}: {
+  dept:     string
+  entries:  GradeQueueEntry[]
+  expanded: boolean
+  onToggle: () => void
+  onQr:     (id: string) => void
+}) {
+  const graded = entries.filter(e => e.status === 'SUBMITTED').length
+
+  return (
+    <div className="border border-gray-100 rounded-lg overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-2.5 px-3 py-2 bg-gray-50/80 hover:bg-gray-100 transition-colors text-left"
+      >
+        <span className={`text-gray-400 text-xs transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+        <span className="text-xs font-bold text-tps-navy font-mono w-7">{dept}</span>
+        <span className="text-xs text-gray-600 flex-1">{deptLabel(dept)}</span>
+        <span className={`text-xs tabular-nums font-medium ${graded === entries.length ? 'text-green-600' : 'text-gray-400'}`}>
+          {graded}/{entries.length} graded
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="bg-white">
+          {entries.map(e => (
+            <SheetRow key={e.entryId} entry={e} onQr={() => onQr(e.entryId)} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Student section ───────────────────────────────────────────────────────────
+
+function StudentSection({
+  entries, className, expanded, onToggle, expandedDepts, onToggleDept, onQr, forceOpen,
+}: {
+  entries:       GradeQueueEntry[]
+  className:     string
+  expanded:      boolean
+  onToggle:      () => void
+  expandedDepts: Set<string>
+  onToggleDept:  (key: string) => void
+  onQr:          (id: string) => void
+  forceOpen:     boolean
+}) {
+  const first  = entries[0]
+  const graded = entries.filter(e => e.status === 'SUBMITTED').length
+  const inProg = entries.filter(e => e.status === 'IN_PROGRESS').length
+
+  // Group this student's sheets by MCG department, in MCG order
+  const deptGroups = useMemo(() => {
+    const map = new Map<string, GradeQueueEntry[]>()
+    for (const e of entries) {
+      const dept = deptFromCourseCode(e.courseCode)
+      if (!map.has(dept)) map.set(dept, [])
+      map.get(dept)!.push(e)
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.courseCode.localeCompare(b.courseCode, undefined, { numeric: true }))
+    }
+    return [...map.entries()].sort((a, b) => deptSortIndex(a[0]) - deptSortIndex(b[0]))
+  }, [entries])
+
+  const isOpen = expanded || forceOpen
+
+  return (
+    <div className="card p-0 overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50/80 transition-colors text-left"
+      >
+        <span className={`text-gray-400 text-sm transition-transform ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800">{first.studentName}</p>
+          <p className="text-xs text-gray-400">
+            {className}-{first.studentNumber} · {TRACK_LABELS[first.track]}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className={`text-sm font-bold tabular-nums ${graded === entries.length ? 'text-green-600' : 'text-tps-navy'}`}>
+            {graded}/{entries.length}
+          </p>
+          <p className="text-[10px] text-gray-400">
+            graded{inProg > 0 && ` · ${inProg} in progress`}
+          </p>
+        </div>
+      </button>
+
+      {isOpen && (
+        <div className="px-3 pb-3 space-y-2">
+          {deptGroups.map(([dept, deptEntries]) => {
+            const key = `${first.studentId}:${dept}`
+            return (
+              <DeptGroup
+                key={dept}
+                dept={dept}
+                entries={deptEntries}
+                expanded={expandedDepts.has(key) || forceOpen}
+                onToggle={() => onToggleDept(key)}
+                onQr={onQr}
+              />
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main queue ────────────────────────────────────────────────────────────────
+
+export function GradeQueue({ entries }: { entries: GradeQueueEntry[] }) {
+  const [filter,           setFilter]           = useState<Filter>('all')
+  const [search,           setSearch]           = useState('')
+  const [qrEntryId,        setQrEntryId]        = useState<string | null>(null)
+  const [expandedStudents, setExpandedStudents] = useState<Set<string>>(new Set())
+  const [expandedDepts,    setExpandedDepts]    = useState<Set<string>>(new Set())
 
   const counts = {
     NOT_STARTED: entries.filter(e => e.status === 'NOT_STARTED').length,
     IN_PROGRESS: entries.filter(e => e.status === 'IN_PROGRESS').length,
     SUBMITTED:   entries.filter(e => e.status === 'SUBMITTED').length,
   }
+
+  // Apply status + search filters at the sheet level
+  const searching = search.trim().length > 0
+  const filtered = useMemo(() => entries.filter(e => {
+    if (filter !== 'all' && e.status !== filter) return false
+    if (searching) {
+      const q = search.toLowerCase()
+      if (!e.studentName.toLowerCase().includes(q) &&
+          !e.courseCode.toLowerCase().includes(q) &&
+          !e.templateTitle.toLowerCase().includes(q)) return false
+    }
+    return true
+  }), [entries, filter, search, searching])
+
+  // Class → student grouping
+  const classSections = useMemo(() => {
+    const byClass = new Map<string, GradeQueueEntry[]>()
+    for (const e of filtered) {
+      if (!byClass.has(e.className)) byClass.set(e.className, [])
+      byClass.get(e.className)!.push(e)
+    }
+
+    return [...byClass.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([className, classEntries]) => {
+        const byStudent = new Map<string, GradeQueueEntry[]>()
+        for (const e of classEntries) {
+          if (!byStudent.has(e.studentId)) byStudent.set(e.studentId, [])
+          byStudent.get(e.studentId)!.push(e)
+        }
+        const students = [...byStudent.values()]
+          .sort((a, b) => a[0].studentSortKey.localeCompare(b[0].studentSortKey))
+        return { className, students }
+      })
+  }, [filtered])
+
+  // When filtering or searching, auto-expand so results are visible
+  const forceOpen = searching || filter !== 'all'
+
+  function toggleStudent(id: string) {
+    setExpandedStudents(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) { next.delete(id) } else { next.add(id) }
+      return next
+    })
+  }
+
+  function toggleDept(key: string) {
+    setExpandedDepts(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) { next.delete(key) } else { next.add(key) }
+      return next
+    })
+  }
+
+  const qrEntry = qrEntryId ? entries.find(e => e.entryId === qrEntryId) : null
 
   return (
     <div className="space-y-4">
@@ -100,7 +312,7 @@ export function GradeQueue({ entries }: { entries: GradeQueueEntry[]; className:
       <div className="flex flex-col sm:flex-row gap-3">
         <input
           type="search"
-          placeholder="Search student or course…"
+          placeholder="Search student, course, or title…"
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="field-input flex-1"
@@ -122,58 +334,38 @@ export function GradeQueue({ entries }: { entries: GradeQueueEntry[]; className:
         </div>
       </div>
 
-      {/* Entry table */}
-      {filtered.length === 0 ? (
+      {/* Class → Student → Dept → Sheets */}
+      {classSections.length === 0 ? (
         <div className="card text-center py-10 text-gray-400">No entries match your filters.</div>
       ) : (
-        <div className="space-y-2">
-          {filtered.map(entry => {
-            const meta = STATUS_META[entry.status] ?? STATUS_META.NOT_STARTED
-            return (
-              <div key={entry.entryId} className="card flex items-center gap-3 py-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-bold bg-tps-navy/10 text-tps-navy px-1.5 py-0.5 rounded font-mono">
-                      {entry.courseCode}
-                    </span>
-                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${meta.color}`}>
-                      {meta.label}
-                    </span>
-                    <span className="text-[10px] text-gray-400">{TRACK_LABELS[entry.track]}</span>
-                  </div>
-                  <p className="text-sm font-semibold text-gray-800 mt-0.5">{entry.studentName}</p>
-                  <p className="text-xs text-gray-400 truncate">{entry.templateTitle}</p>
-                  {entry.overallScore !== null && (
-                    <p className="text-xs font-semibold mt-0.5 text-tps-navy">
-                      Score: {entry.overallScore.toFixed(1)}%
-                      {entry.overallPass !== null && (
-                        <span className={entry.overallPass ? ' text-green-600' : ' text-red-600'}>
-                          {' '}({entry.overallPass ? 'Pass' : 'Fail'})
-                        </span>
-                      )}
-                    </p>
-                  )}
-                </div>
+        classSections.map(section => (
+          <section key={section.className}>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="h-px flex-1 bg-gray-200" />
+              <span className="text-xs font-bold text-tps-navy uppercase tracking-wider px-2">
+                Class {section.className}
+              </span>
+              <div className="h-px flex-1 bg-gray-200" />
+              <span className="text-xs text-gray-400">{section.students.length} students</span>
+            </div>
 
-                <div className="flex flex-col gap-1.5 shrink-0">
-                  <Link
-                    href={`/portal/grade/${entry.entryId}`}
-                    className="btn-primary text-xs px-3 py-2 text-center"
-                  >
-                    {entry.status === 'NOT_STARTED' ? 'Grade' : 'Edit'}
-                  </Link>
-                  <button
-                    onClick={() => setQrEntryId(entry.entryId)}
-                    className="btn-secondary text-xs px-3 py-2"
-                    title="Show QR code"
-                  >
-                    QR
-                  </button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+            <div className="space-y-2">
+              {section.students.map(studentEntries => (
+                <StudentSection
+                  key={studentEntries[0].studentId}
+                  entries={studentEntries}
+                  className={section.className}
+                  expanded={expandedStudents.has(studentEntries[0].studentId)}
+                  onToggle={() => toggleStudent(studentEntries[0].studentId)}
+                  expandedDepts={expandedDepts}
+                  onToggleDept={toggleDept}
+                  onQr={setQrEntryId}
+                  forceOpen={forceOpen}
+                />
+              ))}
+            </div>
+          </section>
+        ))
       )}
 
       {/* QR modal */}

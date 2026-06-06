@@ -2,18 +2,11 @@
 
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
+import { deptSortIndex, deptLabel } from '@/lib/mcg-departments'
 import type { RoadmapEvent } from './actions'
 import type { SyllabusEventStatus, DepartmentCode } from '@prisma/client'
 
 type Props = { events: RoadmapEvent[]; studentName: string | null }
-
-const PHASE_LABELS: Record<number, string> = {
-  5: 'Phase 5 — Preparatory',
-  6: 'Phase 6 — Fundamentals',
-  7: 'Phase 7 — Systems',
-  8: 'Phase 8 — Characterization',
-  9: 'Phase 9 — Advanced',
-}
 
 const DEPT_LABELS: Record<DepartmentCode, string> = {
   AN: 'Ancillary',
@@ -180,30 +173,37 @@ const ALL_STATUSES: (SyllabusEventStatus | 'all')[] = ['all', 'LOCKED', 'UPCOMIN
 
 export function RoadmapView({ events, studentName }: Props) {
   const [filterStatus, setFilterStatus] = useState<SyllabusEventStatus | 'all'>('all')
-  const [filterPhase,  setFilterPhase]  = useState<number | 'all'>('all')
+  const [filterDept,   setFilterDept]   = useState<DepartmentCode | 'all'>('all')
   const [expandedId,   setExpandedId]   = useState<string | null>(null)
   const [search,       setSearch]       = useState('')
 
-  const phases   = useMemo(() => [...new Set(events.map(e => e.phase))].sort(), [events])
+  // Departments present, in MCG curriculum order
+  const depts = useMemo(
+    () => [...new Set(events.map(e => e.deptCode))].sort((a, b) => deptSortIndex(a) - deptSortIndex(b)),
+    [events],
+  )
   const filtered = useMemo(() => {
     let list = events
     if (filterStatus !== 'all') list = list.filter(e => e.status === filterStatus)
-    if (filterPhase  !== 'all') list = list.filter(e => e.phase === filterPhase)
+    if (filterDept   !== 'all') list = list.filter(e => e.deptCode === filterDept)
     if (search.trim())          list = list.filter(e =>
       e.courseCode.toLowerCase().includes(search.toLowerCase()) ||
       e.title.toLowerCase().includes(search.toLowerCase())
     )
     return list
-  }, [events, filterStatus, filterPhase, search])
+  }, [events, filterStatus, filterDept, search])
 
-  // Group filtered events by phase
-  const byPhase = useMemo(() => {
-    const map = new Map<number, RoadmapEvent[]>()
+  // Group filtered events by MCG department (course), in MCG order
+  const byDept = useMemo(() => {
+    const map = new Map<DepartmentCode, RoadmapEvent[]>()
     for (const e of filtered) {
-      if (!map.has(e.phase)) map.set(e.phase, [])
-      map.get(e.phase)!.push(e)
+      if (!map.has(e.deptCode)) map.set(e.deptCode, [])
+      map.get(e.deptCode)!.push(e)
     }
-    return map
+    for (const list of map.values()) {
+      list.sort((a, b) => a.courseCode.localeCompare(b.courseCode, undefined, { numeric: true }))
+    }
+    return new Map([...map.entries()].sort((a, b) => deptSortIndex(a[0]) - deptSortIndex(b[0])))
   }, [filtered])
 
   const hasStudentData = events.some(e => e.status !== null)
@@ -242,17 +242,17 @@ export function RoadmapView({ events, studentName }: Props) {
         />
 
         <div className="flex gap-1 flex-wrap">
-          {(['all', ...phases] as (number | 'all')[]).map(p => (
+          {(['all', ...depts] as (DepartmentCode | 'all')[]).map(d => (
             <button
-              key={p}
-              onClick={() => setFilterPhase(p)}
+              key={d}
+              onClick={() => setFilterDept(d)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                filterPhase === p
+                filterDept === d
                   ? 'bg-tps-navy text-white'
                   : 'bg-white border border-gray-200 text-gray-600 hover:border-tps-orange hover:text-tps-orange'
               }`}
             >
-              {p === 'all' ? 'All Phases' : `Ph ${p}`}
+              {d === 'all' ? 'All Courses' : d}
             </button>
           ))}
         </div>
@@ -277,25 +277,25 @@ export function RoadmapView({ events, studentName }: Props) {
       {/* Results count */}
       <p className="text-xs text-gray-400">{filtered.length} event{filtered.length !== 1 ? 's' : ''} shown</p>
 
-      {/* Phase sections */}
-      {byPhase.size === 0 ? (
+      {/* Course (department) sections — MCG order */}
+      {byDept.size === 0 ? (
         <div className="card text-center py-10 text-gray-400">No events match your filters.</div>
       ) : (
-        Array.from(byPhase.entries()).map(([phase, phaseEvents]) => (
-          <section key={phase}>
-            {/* Phase header */}
+        Array.from(byDept.entries()).map(([dept, deptEvents]) => (
+          <section key={dept}>
+            {/* Course header */}
             <div className="flex items-center gap-3 mb-3">
               <div className="h-px flex-1 bg-gray-200" />
               <span className="text-xs font-bold text-tps-navy uppercase tracking-wider px-2">
-                {PHASE_LABELS[phase] ?? `Phase ${phase}`}
+                {dept} — {deptLabel(dept)}
               </span>
               <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs text-gray-400">{phaseEvents.length} events</span>
+              <span className="text-xs text-gray-400">{deptEvents.length} events</span>
             </div>
 
             {/* Event grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {phaseEvents.map(event => (
+              {deptEvents.map(event => (
                 <EventNode
                   key={event.id}
                   event={event}

@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { deptSortIndex, deptLabel } from '@/lib/mcg-departments'
 import {
   createWeekAction, updateWeekAction, deleteWeekAction,
   scheduleEventAction, unscheduleEventAction, toggleConfirmAction,
@@ -296,16 +297,17 @@ function CatalogPicker({
   onClose: () => void
 }) {
   const [search, setSearch] = useState('')
-  const [phase,  setPhase]  = useState<number | 'all'>('all')
+  const [dept,   setDept]   = useState<string | 'all'>('all')
 
   const filtered = catalog.filter(e => {
-    if (phase !== 'all' && e.phase !== phase) return false
+    if (dept !== 'all' && e.deptCode !== dept) return false
     if (search && !e.courseCode.toLowerCase().includes(search.toLowerCase()) &&
         !e.title.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
 
-  const phases = [...new Set(catalog.map(e => e.phase))].sort()
+  const depts = [...new Set(catalog.map(e => e.deptCode))]
+    .sort((a, b) => deptSortIndex(a) - deptSortIndex(b))
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -324,12 +326,12 @@ function CatalogPicker({
             className="field-input flex-1 min-w-[180px]"
           />
           <select
-            value={phase}
-            onChange={e => setPhase(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+            value={dept}
+            onChange={e => setDept(e.target.value)}
             className="field-input w-auto"
           >
-            <option value="all">All Phases</option>
-            {phases.map(p => <option key={p} value={p}>Phase {p}</option>)}
+            <option value="all">All Courses</option>
+            {depts.map(d => <option key={d} value={d}>{d} — {deptLabel(d)}</option>)}
           </select>
         </div>
 
@@ -349,7 +351,6 @@ function CatalogPicker({
                 <p className="text-xs font-mono font-bold text-tps-navy">{e.courseCode}</p>
                 <p className="text-sm text-gray-700 truncate">{e.title}</p>
               </div>
-              <span className="text-[10px] text-gray-400 shrink-0">P{e.phase}</span>
             </button>
           ))}
         </div>
