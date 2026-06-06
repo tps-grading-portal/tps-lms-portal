@@ -106,22 +106,6 @@ export function PortalSidebar({ role }: { role: UserRole }) {
       {visibleItems.map(item => (
         <SidebarLink key={item.href} href={item.href} label={item.label} icon={item.icon} />
       ))}
-
-      {/* Grading Tools divider — link back to existing admin grading portal */}
-      <div className="pt-3 mt-3 border-t border-gray-200">
-        <p className="px-3 mb-1 text-[10px] font-bold uppercase tracking-widest text-gray-400">
-          Grading Tools
-        </p>
-        <SidebarLink href="/admin" label="Grading Portal" icon="chart-bar" />
-      </div>
-
-      {/* Chat stub */}
-      <div className="pt-3 mt-3 border-t border-gray-200">
-        <p className="px-3 mb-1 text-[10px] font-bold uppercase tracking-widest text-gray-400">
-          Digital Squadron
-        </p>
-        <SidebarLink href="/portal/chat" label="Chat" icon="chat" />
-      </div>
     </nav>
   )
 

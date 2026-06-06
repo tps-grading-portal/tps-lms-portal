@@ -26,7 +26,7 @@ export default async function ClassesPage() {
           <h1 className="text-2xl font-bold text-tps-navy">Classes</h1>
           <p className="text-gray-500 text-sm">{classes.length} class cohorts</p>
         </div>
-        <Link href="/admin/classes/new" className="btn-primary text-sm px-4 py-2">
+        <Link href="/portal/classes/new" className="btn-primary text-sm px-4 py-2">
           + New Class
         </Link>
       </div>
@@ -35,7 +35,7 @@ export default async function ClassesPage() {
         {classes.map(c => (
           <a
             key={c.id}
-            href={`/admin/classes/${c.id}`}
+            href={`/portal/classes/${c.id}`}
             className="card flex items-center justify-between hover:border-tps-orange transition-colors group"
           >
             <div>

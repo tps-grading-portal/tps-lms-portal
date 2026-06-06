@@ -22,6 +22,11 @@ export type Permission =
   | 'view:flight_schedule'    // everyone except STUDENT
   | 'manage:classes'          // SYSTEM_ADMIN, DEAN
   | 'impersonate:user'        // SYSTEM_ADMIN only
+  | 'view:lessons'            // all authenticated roles
+  | 'author:lessons'          // LINE_INSTRUCTOR, DEPT_CHAIR, SYSTEM_ADMIN
+  | 'schedule:academic'       // DEAN, SYSTEM_ADMIN
+  | 'view:academic_schedule'  // all authenticated roles
+  | 'grade:queue'             // LINE_INSTRUCTOR, DEPT_CHAIR, SYSTEM_ADMIN
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   SYSTEM_ADMIN: [
@@ -34,6 +39,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'review:content',
     'submit:content',
     'grade:enter',
+    'grade:queue',
     'view:all_standings',
     'view:dept_standings',
     'view:own_grades',
@@ -46,6 +52,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view:flight_schedule',
     'manage:classes',
     'impersonate:user',
+    'view:lessons',
+    'author:lessons',
+    'schedule:academic',
+    'view:academic_schedule',
   ],
   DEAN_COMMANDER: [
     'manage:curriculum',
@@ -58,6 +68,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'manage:classes',
     'use:chat',
     'view:sanitized_surveys',
+    'view:lessons',
+    'schedule:academic',
+    'view:academic_schedule',
   ],
   A9_STANDARDS: [
     'view:all_analytics',
@@ -72,6 +85,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view:sanitized_surveys',
     'view:flight_schedule',
     'use:chat',
+    'view:lessons',
+    'view:academic_schedule',
   ],
   DEPT_CHAIR: [
     'view:dept_analytics',
@@ -79,24 +94,35 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'review:content',
     'submit:content',
     'grade:enter',
+    'grade:queue',
     'view:all_standings',
     'view:dept_standings',
     'view:sanitized_surveys',
     'view:flight_schedule',
     'use:chat',
+    'view:lessons',
+    'author:lessons',
+    'schedule:academic',
+    'view:academic_schedule',
   ],
   LINE_INSTRUCTOR: [
     'submit:content',
     'grade:enter',
+    'grade:queue',
     'view:dept_standings',
     'view:instructor_analytics',
     'view:sanitized_surveys',
     'view:flight_schedule',
     'use:chat',
+    'view:lessons',
+    'author:lessons',
+    'view:academic_schedule',
   ],
   STUDENT: [
     'view:own_grades',
     'use:chat',
+    'view:lessons',
+    'view:academic_schedule',
   ],
 }
 
@@ -121,15 +147,18 @@ export type NavItem = {
 }
 
 export const PORTAL_NAV: NavItem[] = [
-  { label: 'Dashboard',        href: '/portal/dashboard',  requiredPermission: 'use:chat',              icon: 'home' },
-  { label: 'Standings',        href: '/portal/standings',  requiredPermission: 'view:dept_standings',   icon: 'trophy' },
-  { label: 'Syllabus',         href: '/portal/syllabus',   requiredPermission: 'view:own_grades',       icon: 'map' },
-  { label: 'My Grades',        href: '/portal/grades',     requiredPermission: 'view:own_grades',       icon: 'chart-bar' },
-  { label: 'Content Vault',    href: '/portal/vault',      requiredPermission: 'submit:content',        icon: 'folder-lock' },
-  { label: 'Analytics',        href: '/portal/analytics',  requiredPermission: 'view:instructor_analytics', icon: 'chart-line' },
-  { label: 'Surveys',          href: '/portal/surveys',    requiredPermission: 'manage:surveys',        icon: 'clipboard' },
-  { label: 'Flight Schedule',  href: '/portal/schedule',   requiredPermission: 'view:flight_schedule',  icon: 'calendar' },
-  { label: 'Weighting Matrix', href: '/portal/weighting',  requiredPermission: 'manage:weighting_matrix', icon: 'scale' },
-  { label: 'User Management',  href: '/portal/users',      requiredPermission: 'manage:users',          icon: 'users' },
-  { label: 'Classes',          href: '/portal/classes',    requiredPermission: 'manage:classes',        icon: 'academic-cap' },
+  { label: 'Dashboard',          href: '/portal/dashboard',          requiredPermission: 'use:chat',                  icon: 'home' },
+  { label: 'Academic Schedule',  href: '/portal/academic-schedule',  requiredPermission: 'view:academic_schedule',    icon: 'calendar' },
+  { label: 'Standings',          href: '/portal/standings',          requiredPermission: 'view:dept_standings',       icon: 'trophy' },
+  { label: 'Grade Queue',        href: '/portal/grade',              requiredPermission: 'grade:queue',               icon: 'clipboard' },
+  { label: 'Syllabus',           href: '/portal/syllabus',           requiredPermission: 'view:own_grades',           icon: 'map' },
+  { label: 'My Grades',          href: '/portal/grades',             requiredPermission: 'view:own_grades',           icon: 'chart-bar' },
+  { label: 'Content Vault',      href: '/portal/vault',              requiredPermission: 'submit:content',            icon: 'folder-lock' },
+  { label: 'Analytics',          href: '/portal/analytics',          requiredPermission: 'view:instructor_analytics', icon: 'chart-line' },
+  { label: 'Surveys',            href: '/portal/surveys',            requiredPermission: 'manage:surveys',            icon: 'clipboard' },
+  { label: 'Flight Schedule',    href: '/portal/schedule',           requiredPermission: 'view:flight_schedule',      icon: 'calendar' },
+  { label: 'Weighting Matrix',   href: '/portal/weighting',          requiredPermission: 'manage:weighting_matrix',   icon: 'scale' },
+  { label: 'User Management',    href: '/portal/users',              requiredPermission: 'manage:users',              icon: 'users' },
+  { label: 'Classes',            href: '/portal/classes',            requiredPermission: 'manage:classes',            icon: 'academic-cap' },
+  { label: 'Chat',               href: '/portal/chat',               requiredPermission: 'use:chat',                  icon: 'chat' },
 ]

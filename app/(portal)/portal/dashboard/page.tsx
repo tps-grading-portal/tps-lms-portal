@@ -167,15 +167,17 @@ function getQuickLinks(role: string): QuickLink[] {
       ]
     case 'LINE_INSTRUCTOR':
       return [
-        { href: '/portal/vault',     title: 'Submit Content',      description: 'Upload course materials' },
-        { href: '/portal/schedule',  title: 'Flight Schedule',     description: 'Today\'s flight and ground ops' },
-        { href: '/portal/standings', title: 'Standings',           description: 'Class performance view' },
+        { href: '/portal/grade',             title: 'Grade Queue',        description: 'Enter and submit student grades' },
+        { href: '/portal/academic-schedule', title: 'Academic Schedule',  description: 'View and manage lesson schedule' },
+        { href: '/portal/vault',             title: 'Submit Content',     description: 'Upload course materials' },
+        { href: '/portal/standings',         title: 'Standings',          description: 'Class performance view' },
       ]
     case 'STUDENT':
       return [
-        { href: '/portal/syllabus',  title: 'Syllabus Roadmap',    description: 'Your course progression map' },
-        { href: '/portal/grades',    title: 'My Grades',           description: 'View your graded events' },
-        { href: '/portal/schedule',  title: 'Flight Schedule',     description: 'Check today\'s schedule' },
+        { href: '/portal/academic-schedule', title: 'Schedule',           description: 'Your upcoming lessons' },
+        { href: '/portal/syllabus',          title: 'Syllabus Roadmap',   description: 'Your course progression map' },
+        { href: '/portal/grades',            title: 'My Grades',          description: 'View your graded events' },
+        { href: '/portal/schedule',          title: 'Flight Schedule',    description: 'Check today\'s schedule' },
       ]
     default:
       return []

@@ -3,7 +3,7 @@
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/server-auth'
 import { can } from '@/lib/permissions'
-import { saveGradebookEntryAction } from '@/app/(admin)/admin/gradebook/actions'
+import { scoreEntry } from '@/lib/gradebook-scoring'
 import { computeStandings } from '@/lib/standings'
 import { revalidatePath } from 'next/cache'
 import type { Track } from '@prisma/client'
@@ -88,7 +88,7 @@ export async function getEntryForGradingAction(entryId: string) {
   return entry
 }
 
-// ── Portal-auth wrapper for saving a gradebook entry ─────────────────────────
+// ── Save a gradebook entry (self-contained, no admin dependency) ──────────────
 
 export async function portalSaveEntryAction(
   entryId:        string,
@@ -104,31 +104,81 @@ export async function portalSaveEntryAction(
   const user = await requireAuth()
   if (!can(user.role, 'grade:enter')) return { error: 'Insufficient permissions to grade' }
 
-  // Delegate to the existing scoring engine, bypassing admin auth (we already checked)
-  const result = await saveGradebookEntryAction(
-    entryId,
-    instructorName || `${user.firstName} ${user.lastName}`.trim(),
-    scores,
-    submit,
-    true, // isInstructor flag — bypasses admin session check
-  )
+  const entry = await db.gradebookEntry.findUnique({
+    where:   { id: entryId },
+    include: { template: { include: { tasks: true } }, student: { select: { classId: true } } },
+  })
+  if (!entry)        return { error: 'Entry not found.' }
+  if (entry.isLocked) return { error: 'This gradesheet is locked.' }
 
-  if ('error' in result && result.error) return { error: result.error }
+  const resolvedName = instructorName || `${user.firstName} ${user.lastName}`.trim()
 
-  // Trigger standings recalculation for the active class
-  if (submit) {
-    try {
-      const entry = await db.gradebookEntry.findUnique({
-        where:   { id: entryId },
-        include: { student: { select: { classId: true } } },
-      })
-      if (entry?.student?.classId) {
-        await computeStandings(entry.student.classId)
-      }
-    } catch {
-      // Non-fatal: standings will recompute on next view
+  // Build scoring inputs
+  const taskInputs = entry.template.tasks.map((t) => {
+    const s = scores[t.id]
+    return {
+      taskId:             t.id,
+      isAirmanship:       t.isAirmanship,
+      isBonus:            t.isBonus,
+      isDemo:             t.isDemo,
+      isNA:               s?.isNA ?? false,
+      minScore:           t.minScore,
+      minScoreHard:       t.minScoreHard,
+      desiredScore:       t.desiredScore,
+      weight:             t.weight,
+      scoreEntered:       s?.scoreEntered ?? null,
+      numberAccomplished: s?.numberAccomplished ?? null,
+      numberRequired:     t.numberRequired,
     }
+  })
 
+  const result = scoreEntry(taskInputs)
+
+  // Upsert task scores
+  for (const t of entry.template.tasks) {
+    const s = scores[t.id]
+    if (!s) continue
+    const taskResult = result.taskResults.find((r) => r.taskId === t.id)
+    await db.gradebookTaskScore.upsert({
+      where:  { entryId_taskId: { entryId, taskId: t.id } },
+      update: {
+        scoreEntered:       s.scoreEntered ?? null,
+        numberAccomplished: s.numberAccomplished ?? 1,
+        isNA:               s.isNA ?? false,
+        scoreAwarded:       taskResult?.scoreAwarded ?? null,
+        isAutoFail:         taskResult?.isAutoFail ?? false,
+        comments:           s.comments ?? null,
+      },
+      create: {
+        entryId,
+        taskId:             t.id,
+        scoreEntered:       s.scoreEntered ?? null,
+        numberAccomplished: s.numberAccomplished ?? 1,
+        isNA:               s.isNA ?? false,
+        scoreAwarded:       taskResult?.scoreAwarded ?? null,
+        isAutoFail:         taskResult?.isAutoFail ?? false,
+        comments:           s.comments ?? null,
+      },
+    })
+  }
+
+  await db.gradebookEntry.update({
+    where: { id: entryId },
+    data: {
+      instructorName: resolvedName,
+      instructorId:   user.id,
+      status:         submit ? 'SUBMITTED' : 'IN_PROGRESS',
+      isLocked:       submit,
+      submittedAt:    submit ? new Date() : null,
+      overallScore:   submit ? result.overallScore : null,
+      academicPass:   submit ? result.academicPass : null,
+      airmanshipPass: submit ? result.airmanshipPass : null,
+      overallPass:    submit ? result.overallPass : null,
+    },
+  })
+
+  if (submit && entry.student.classId) {
+    try { await computeStandings(entry.student.classId) } catch { /* non-fatal */ }
     revalidatePath('/portal/standings')
     revalidatePath('/portal/grade')
   }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import Link from 'next/link'
 import type { RoadmapEvent } from './actions'
 import type { SyllabusEventStatus, DepartmentCode } from '@prisma/client'
 
@@ -103,7 +104,7 @@ function EventNode({ event, expanded, onToggle }: {
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="px-3 pb-3 pt-1 border-t border-gray-100 space-y-1.5" onClick={e => e.stopPropagation()}>
+        <div className="px-3 pb-3 pt-1 border-t border-gray-100 space-y-2" onClick={e => e.stopPropagation()}>
           {event.description && (
             <p className="text-xs text-gray-600 leading-relaxed">{event.description}</p>
           )}
@@ -114,6 +115,12 @@ function EventNode({ event, expanded, onToggle }: {
               <span>{event.prerequisiteIds.length} prerequisite(s)</span>
             )}
           </div>
+          <Link
+            href={`/portal/lessons/${encodeURIComponent(event.courseCode)}`}
+            className="inline-block text-xs font-semibold text-tps-orange hover:underline"
+          >
+            Open lesson page →
+          </Link>
         </div>
       )}
     </div>

@@ -234,6 +234,12 @@ model User {
   // Gradebook (as instructor)
   gradebookEntries   GradebookEntry[]      @relation("EntryInstructor")
 
+  // Lesson authoring
+  authoredLessonPages LessonPage[]
+
+  // Academic scheduling (as assigned instructor)
+  scheduledEvents     ClassSyllabusSchedule[] @relation("ScheduleInstructor")
+
   // System admin actions
   auditLogs          AuditLog[]
 
@@ -304,6 +310,7 @@ model Class {
   surveyTemplates       SurveyQuestionTemplate[]
   criteria              Criterion[]
   scheduledEvents       ClassSyllabusSchedule[]
+  academicWeeks         AcademicWeek[]
   contentVerifications  ContentVerification[]
   chatChannels          ChatChannel[]
   flightScheduleEntries FlightScheduleEntry[]
@@ -351,6 +358,7 @@ model Student {
   entries       GradebookEntry[]
   syllabusEvents StudentSyllabusEvent[]
   alerts        StudentAlert[]
+  lessonViews   StudentLessonView[]
 
   @@unique([classId, number])
   @@map("students")
@@ -400,6 +408,7 @@ model SyllabusEvent {
   contentFiles     ContentFile[]
   curriculumWeights CurriculumWeight[]
   surveyDeployments SurveyDeployment[]
+  lessonPage       LessonPage?
 
   @@map("syllabus_events")
 }
@@ -420,20 +429,43 @@ model SyllabusEventPrerequisite {
 
 // When a specific class has a specific event scheduled
 model ClassSyllabusSchedule {
-  id             String    @id @default(cuid())
-  classId        String
+  id              String    @id @default(cuid())
+  classId         String
   syllabusEventId String
-  scheduledDate  DateTime?
-  scheduledTime  String?   // HH:MM
-  locationRoom   String?
-  notes          String?   @db.Text
-  isConfirmed    Boolean   @default(false)
+  academicWeekId  String?   // FK → AcademicWeek
+  instructorId    String?   // FK → User (who is teaching this event)
+  scheduledDate   DateTime?
+  scheduledTime   String?   // HH:MM
+  durationMinutes Int?
+  locationRoom    String?
+  notes           String?   @db.Text
+  isConfirmed     Boolean   @default(false)
 
-  class         Class         @relation(fields: [classId],        references: [id], onDelete: Cascade)
+  class         Class         @relation(fields: [classId],         references: [id], onDelete: Cascade)
   syllabusEvent SyllabusEvent @relation(fields: [syllabusEventId], references: [id])
+  academicWeek  AcademicWeek? @relation(fields: [academicWeekId],  references: [id], onDelete: SetNull)
+  instructor    User?         @relation("ScheduleInstructor", fields: [instructorId], references: [id], onDelete: SetNull)
 
   @@unique([classId, syllabusEventId])
   @@map("class_syllabus_schedules")
+}
+
+// Academic week grouping for the class schedule
+model AcademicWeek {
+  id         String   @id @default(cuid())
+  classId    String
+  weekNumber Int
+  label      String   // e.g. "Phase 6 — Week 2"
+  theme      String?  // e.g. "Performance Flight Testing"
+  startDate  DateTime @db.Date
+  endDate    DateTime @db.Date
+  notes      String?  @db.Text
+
+  class           Class                  @relation(fields: [classId], references: [id], onDelete: Cascade)
+  scheduledEvents ClassSyllabusSchedule[]
+
+  @@unique([classId, weekNumber])
+  @@map("academic_weeks")
 }
 
 // Student's completion status for each event
@@ -511,6 +543,7 @@ model ContentFile {
   nextVersions    ContentFile[]   @relation("FileVersionHistory")
   workflow        ContentWorkflow?
   verifications   ContentVerification[]
+  lessonFiles     LessonPageFile[]
 
   @@map("content_files")
 }
@@ -554,6 +587,63 @@ model ContentVerification {
 
   @@unique([contentFileId, classId])
   @@map("content_verifications")
+}
+
+// ============================================================
+// ── LESSON PAGES ────────────────────────────────────────────
+// ============================================================
+
+// Structured lesson portal page per SyllabusEvent
+model LessonPage {
+  id                 String    @id @default(cuid())
+  syllabusEventId    String    @unique
+  authorId           String
+  overview           String?   @db.Text
+  learningObjectives Json?     // string[]
+  outline            String?   @db.Text
+  estimatedMinutes   Int?
+  isPublished        Boolean   @default(false)
+  publishedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  syllabusEvent SyllabusEvent      @relation(fields: [syllabusEventId], references: [id], onDelete: Cascade)
+  author        User               @relation(fields: [authorId],        references: [id])
+  files         LessonPageFile[]
+  studentViews  StudentLessonView[]
+
+  @@map("lesson_pages")
+}
+
+// Junction: vault-approved file attached to a lesson page
+model LessonPageFile {
+  id            String  @id @default(cuid())
+  lessonPageId  String
+  contentFileId String
+  sortOrder     Int     @default(0)
+  displayLabel  String?
+
+  lessonPage  LessonPage  @relation(fields: [lessonPageId],  references: [id], onDelete: Cascade)
+  contentFile ContentFile @relation(fields: [contentFileId], references: [id], onDelete: Cascade)
+
+  @@unique([lessonPageId, contentFileId])
+  @@map("lesson_page_files")
+}
+
+// Tracks when a student has viewed a lesson page
+model StudentLessonView {
+  id            String   @id @default(cuid())
+  studentId     String
+  lessonPageId  String
+  firstViewedAt DateTime @default(now())
+  lastViewedAt  DateTime @updatedAt
+  isCompleted   Boolean  @default(false)
+
+  student    Student    @relation(fields: [studentId],    references: [id], onDelete: Cascade)
+  lessonPage LessonPage @relation(fields: [lessonPageId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, lessonPageId])
+  @@map("student_lesson_views")
 }
 
 // ============================================================
