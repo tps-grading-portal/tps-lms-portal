@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@/lib/auth'
 import QRCode from 'qrcode'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(req: NextRequest) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   const url = req.nextUrl.searchParams.get('url')
   if (!url) {
     return NextResponse.json({ error: 'url parameter required' }, { status: 400 })

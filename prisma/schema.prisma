@@ -1,5 +1,6 @@
-// TPS Grading Portal — Prisma Schema v2
+// TPS LMS — Unified Prisma Schema v3
 // PostgreSQL + Prisma 6
+// All existing v2 models preserved. New LMS models appended.
 
 generator client {
   provider = "prisma-client-js"
@@ -11,38 +12,302 @@ datasource db {
 }
 
 // ============================================================
-// ADMIN
+// ENUMS
 // ============================================================
 
-model AdminUser {
-  id           String    @id @default(cuid())
-  username     String    @unique
-  passwordHash String
-  createdAt    DateTime  @default(now())
-  lastLoginAt  DateTime?
+enum UserRole {
+  SYSTEM_ADMIN    // Full CRUD, impersonation, inline editing
+  DEAN_COMMANDER  // Strategic oversight, owns weighting matrix
+  A9_STANDARDS    // Content vault gatekeeper, survey anonymity shield
+  DEPT_CHAIR      // Tactical oversight, dept-scoped analytics
+  LINE_INSTRUCTOR // Grade entry, restricted analytics
+  STUDENT         // Syllabus roadmap, own gradebook view
+}
 
-  @@map("admin_users")
+enum Concentration {
+  FTC // Flight Test Engineering
+  STC // Space Test Engineering
+}
+
+enum DepartmentCode {
+  AN  // Ancillary
+  CF  // Check Flights
+  SO  // Space Operations
+  AS  // Astronautical Sciences
+  PF  // Performance
+  FQ  // Flying Qualities
+  SY  // Mission Systems
+  TF  // Test Foundations
+  TL  // Test Leadership
+}
+
+enum EventSuffix {
+  A  // Academic Lecture
+  B  // Asynchronous Content
+  C  // Control Room
+  E  // Exam / Assessment
+  F  // Flight
+  G  // Ground School
+  H  // Ground Training
+  I  // Ground Test
+  L  // Lab
+  M  // MIB (Mission Improvement Briefing)
+  O  // Space Operation
+  R  // Written Report
+  S  // Simulator
+  W  // Working Group
+  Y  // Oral Report
+  Z  // Debrief
+}
+
+enum SyllabusEventStatus {
+  LOCKED       // Prerequisites not met
+  UPCOMING     // Next in sequence, ready to start
+  IN_PROGRESS  // Started, not yet submitted
+  COMPLETED    // Graded / passed
+  REVIEW       // Below threshold, needs attention
+}
+
+enum ContentStatus {
+  SANDBOX          // Submitted by instructor, not yet reviewed
+  PENDING_CHAIR    // Dept Chair reviewing
+  PENDING_A9       // A9 reviewing
+  VAULT            // Approved, in active vault
+  ARCHIVED         // Replaced/expired — offline archive only
+}
+
+enum ContentVerificationStatus {
+  PENDING
+  VERIFIED_NO_CHANGES  // Auto-publish eligible
+  CHANGES_REQUIRED     // Must go through A9 workflow
+  RECERTIFICATION      // A9 override — forced recert
+}
+
+enum StorageProvider {
+  VERCEL_BLOB
+  AZURE_BLOB
+  LOCAL // dev only
+}
+
+enum AlertType {
+  CONSECUTIVE_SCORE_DROPS     // 3+ drops in same competency
+  BELOW_PASSING_THRESHOLD     // Score < 70 trend
+  PREREQ_MISSING_FOR_FLIGHT   // Has scheduled flight, missing prereq
+  GRADER_HARD_BIAS            // IRR flagging hard grader
+  GRADER_SOFT_BIAS            // IRR flagging lenient grader
+  CONTENT_EXPIRING_SOON       // Vault content near 3-class limit
+  SURVEY_POOR_FEEDBACK        // Student feedback triggered recert flag
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum ChatChannelType {
+  TRACK        // Auto: #pilot-track, #fte-track, etc.
+  COURSE       // Auto: #tf-6241, #pf-8332, etc.
+  CLASS        // Auto: #26a-general
+  DEPARTMENT   // Auto: #dept-performance
+  DIRECT       // 1:1
+  GENERAL      // Manual
+}
+
+// Legacy enums — preserved from v2
+enum AccessRole {
+  GRADER
+  PANEL_CHAIR
+}
+
+enum Pillar {
+  TESTER
+  LEADER
+  THINKER
+}
+
+enum SessionStatus {
+  OPEN
+  PENDING_RESOLUTION
+  READY_TO_FINALIZE
+  FINALIZED
+}
+
+enum EditSource {
+  GRADER
+  PANEL_CHAIR
+}
+
+enum SurveyType {
+  STUDENT
+  INSTRUCTOR
+}
+
+enum QuestionType {
+  TEXT
+  MULTIPLE_CHOICE
+  MULTI_SELECT
+  LIKERT
+  DATE
+  NUMBER
+}
+
+enum GradesheetType {
+  FLIGHT
+  REPORT
+  ORAL
+  SIM
+  CONTROL_ROOM
+}
+
+enum GradebookEntryStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+}
+
+enum SandboxQuestionType {
+  GRADE_1_8
+  NUMERIC
+  MULTIPLE_CHOICE
+  CHECKBOX
+  TEXT
+  NUMBER
+  REPEATING_SECTION
+}
+
+enum SandboxMode {
+  SURVEY
+  GRADER
+}
+
+enum SandboxSubjectEntry {
+  FREE_TEXT
+  PREDEFINED_LIST
+}
+
+enum SandboxGraderEntry {
+  FREE_TEXT
+  STAFF_LIST
 }
 
 // ============================================================
-// CLASSES & ACCESS CONTROL
+// ── LMS CORE: USERS & RBAC ──────────────────────────────────
+// ============================================================
+
+// Central user model — replaces AdminUser + StaffMember + GradebookInstructor
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  firstName    String
+  lastName     String
+  passwordHash String
+  role         UserRole
+  isActive     Boolean   @default(true)
+  mfaEnabled   Boolean   @default(false)
+  mfaSecret    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  // RBAC access scopes
+  departments        UserDepartment[]
+  trackAccess        UserTrackAccess[]
+
+  // Profile links (one-to-one when applicable)
+  studentProfile     Student?              @relation("StudentUser")
+  staffProfile       StaffMember?          @relation("StaffUser")
+
+  // Content vault
+  uploadedContent    ContentFile[]         @relation("ContentUploader")
+  contentWorkflows   ContentWorkflow[]     @relation("WorkflowActor")
+  contentVerifications ContentVerification[]
+
+  // Chat
+  sentMessages       ChatMessage[]
+  channelMemberships ChatChannelMember[]
+
+  // Surveys
+  deployedSurveys    SurveyDeployment[]
+  publishedReports   SurveySanitizedReport[]
+
+  // Gradebook (as instructor)
+  gradebookEntries   GradebookEntry[]      @relation("EntryInstructor")
+
+  // System admin actions
+  auditLogs          AuditLog[]
+
+  @@map("users")
+}
+
+// Which departments a user has access to (Dept Chairs span 1+)
+model UserDepartment {
+  id           String         @id @default(cuid())
+  userId       String
+  deptCode     DepartmentCode
+  isPrimary    Boolean        @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deptCode])
+  @@map("user_departments")
+}
+
+// Which tracks a user (instructor) can view/grade
+model UserTrackAccess {
+  id     String @id @default(cuid())
+  userId String
+  track  Track
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, track])
+  @@map("user_track_access")
+}
+
+// System admin audit trail
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String   // e.g. "IMPERSONATE_USER", "EDIT_GRADE", "DELETE_FILE"
+  targetId  String?  // id of affected record
+  targetType String? // model name
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// ============================================================
+// ── CLASSES & COHORTS ───────────────────────────────────────
 // ============================================================
 
 model Class {
   id                String    @id @default(cuid())
-  name              String    @unique
-  isActive          Boolean   @default(false)   // class is running (multiple can be true)
-  isCompOralCurrent Boolean   @default(false)   // selected for Comp Oral grading (only one)
+  name              String    @unique    // e.g. "26A"
+  cohortCode        String?              // same as name, explicit
+  concentration     Concentration?       // FTC or STC (null = mixed)
+  startDate         DateTime?
+  endDate           DateTime?
+  isActive          Boolean   @default(false)
+  isCompOralCurrent Boolean   @default(false)
   createdAt         DateTime  @default(now())
   archivedAt        DateTime?
 
-  access            ClassAccess[]
-  students          Student[]
-  sessions          GradingSession[]
-  studentSurveys    StudentSurveyResponse[]
-  instructorSurveys InstructorSurveyResponse[]
-  surveyTemplates   SurveyQuestionTemplate[]
-  criteria          Criterion[]           // class-specific frozen snapshot
+  access                ClassAccess[]
+  students              Student[]
+  sessions              GradingSession[]
+  studentSurveys        StudentSurveyResponse[]
+  instructorSurveys     InstructorSurveyResponse[]
+  surveyTemplates       SurveyQuestionTemplate[]
+  criteria              Criterion[]
+  scheduledEvents       ClassSyllabusSchedule[]
+  contentVerifications  ContentVerification[]
+  chatChannels          ChatChannel[]
+  flightScheduleEntries FlightScheduleEntry[]
+  surveyDeployments     SurveyDeployment[]
 
   @@map("classes")
 }
@@ -60,95 +325,32 @@ model ClassAccess {
   @@map("class_access")
 }
 
-enum AccessRole {
-  GRADER
-  PANEL_CHAIR
-}
-
 // ============================================================
-// STAFF MEMBERS (global)
-// ============================================================
-
-model StaffMember {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-
-  assessments GraderAssessment[]
-
-  @@map("staff_members")
-}
-
-// ============================================================
-// SCENARIOS — global, permanent, sequential numbers
-// Scenario 1 always means the same scenario forever.
-// ============================================================
-
-model Scenario {
-  id       String  @id @default(cuid())
-  number   Int     @unique  // globally unique, never reused
-  label    String           // e.g. "Scenario 1"
-  isActive Boolean @default(true)
-
-  sessions GradingSession[]
-
-  @@map("scenarios")
-}
-
-// ============================================================
-// RUBRIC CRITERIA
-// classId = null  → global template (admin edits these)
-// classId = <id>  → frozen snapshot for that class
-// sortOrder is unique within scope (enforced in app layer)
-// ============================================================
-
-model Criterion {
-  id             String  @id @default(cuid())
-  code           String  // e.g. "1.1" — unique within classId scope
-  pillar         Pillar
-  name           String
-  weight         Float   // must sum to 1.0 within scope
-  outcomesRefs   String
-  description    String  @db.Text
-  waaDescriptor  String  @db.Text
-  avgDescriptor  String  @db.Text
-  failDescriptor String  @db.Text
-  sortOrder      Int
-  isActive       Boolean @default(true)
-  classId        String? // null = global template; set = frozen for this class
-
-  class  Class?          @relation(fields: [classId], references: [id], onDelete: Cascade)
-  grades CriterionGrade[]
-
-  @@map("criteria")
-}
-
-enum Pillar {
-  TESTER
-  LEADER
-  THINKER
-}
-
-// ============================================================
-// STUDENTS  (identified by number, never by name)
-// Displayed as "{class.name}-{number}", e.g. "26A-7"
+// ── STUDENTS ────────────────────────────────────────────────
 // ============================================================
 
 model Student {
   id          String   @id @default(cuid())
   classId     String
-  number      Int      // integer part, e.g. 1, 2, 3 … N
-  track       Track
-  createdAt   DateTime @default(now())
-  // Gradebook / student portal fields
-  viewToken   String?  @unique  // public URL slug for student-facing gradebook
-  viewPinHash String?           // null = never set
+  number      Int      // anonymous ID, e.g. 7 → displayed as "26A-7"
+  track       Track    // hardcoded, never changes
+  // Real identity (Azure-ready, required for full LMS)
+  firstName   String   @default("")
+  lastName    String   @default("")
+  email       String?  @unique
+  // Portal access
+  userId      String?  @unique  // FK to User (when student has portal login)
+  viewToken   String?  @unique
+  viewPinHash String?
   isTempPin   Boolean  @default(false)
+  createdAt   DateTime @default(now())
 
-  class    Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
-  sessions GradingSession[]
-  entries  GradebookEntry[]
+  class         Class              @relation(fields: [classId], references: [id], onDelete: Cascade)
+  userAccount   User?              @relation("StudentUser", fields: [userId], references: [id])
+  sessions      GradingSession[]
+  entries       GradebookEntry[]
+  syllabusEvents StudentSyllabusEvent[]
+  alerts        StudentAlert[]
 
   @@unique([classId, number])
   @@map("students")
@@ -164,45 +366,461 @@ enum Track {
 }
 
 // ============================================================
-// GRADING SESSIONS
+// ── SYLLABUS EVENTS (MCG Catalog) ───────────────────────────
 // ============================================================
+
+// Canonical event from MCG — one record per course block
+model SyllabusEvent {
+  id            String         @id @default(cuid())
+  courseCode    String         @unique // e.g. "TF 6241F"
+  title         String
+  deptCode      DepartmentCode
+  eventSuffix   EventSuffix
+  phase         Int            // 5=prep, 6=fund, 7=systems, 8=char, 9=advanced
+  creditHours   Float          @default(0)
+  description   String?        @db.Text
+  isGraded      Boolean        @default(false)
+  isActive      Boolean        @default(true)
+  sortOrder     Int            @default(0)
+
+  // Which tracks must complete this event
+  tracks        Track[]
+
+  // Link to gradesheet template (when graded)
+  gradesheetTemplateId String?
+  gradesheetTemplate   GradesheetTemplate? @relation(fields: [gradesheetTemplateId], references: [id])
+
+  // Link to comp oral (when this IS the comp oral)
+  isCompOral    Boolean        @default(false)
+
+  prerequisites    SyllabusEventPrerequisite[] @relation("EventPrereqs")
+  requiredBy       SyllabusEventPrerequisite[] @relation("EventRequires")
+  studentEvents    StudentSyllabusEvent[]
+  schedules        ClassSyllabusSchedule[]
+  contentFiles     ContentFile[]
+  curriculumWeights CurriculumWeight[]
+  surveyDeployments SurveyDeployment[]
+
+  @@map("syllabus_events")
+}
+
+// Self-referential prerequisites
+model SyllabusEventPrerequisite {
+  id              String @id @default(cuid())
+  eventId         String // the event that HAS prerequisites
+  prerequisiteId  String // the event that must come first
+  isHard          Boolean @default(true) // hard=blocks, soft=warning only
+
+  event        SyllabusEvent @relation("EventPrereqs",  fields: [eventId],        references: [id], onDelete: Cascade)
+  prerequisite SyllabusEvent @relation("EventRequires", fields: [prerequisiteId],  references: [id], onDelete: Cascade)
+
+  @@unique([eventId, prerequisiteId])
+  @@map("syllabus_event_prerequisites")
+}
+
+// When a specific class has a specific event scheduled
+model ClassSyllabusSchedule {
+  id             String    @id @default(cuid())
+  classId        String
+  syllabusEventId String
+  scheduledDate  DateTime?
+  scheduledTime  String?   // HH:MM
+  locationRoom   String?
+  notes          String?   @db.Text
+  isConfirmed    Boolean   @default(false)
+
+  class         Class         @relation(fields: [classId],        references: [id], onDelete: Cascade)
+  syllabusEvent SyllabusEvent @relation(fields: [syllabusEventId], references: [id])
+
+  @@unique([classId, syllabusEventId])
+  @@map("class_syllabus_schedules")
+}
+
+// Student's completion status for each event
+model StudentSyllabusEvent {
+  id              String              @id @default(cuid())
+  studentId       String
+  syllabusEventId String
+  status          SyllabusEventStatus @default(LOCKED)
+  score           Float?
+  completedAt     DateTime?
+  updatedAt       DateTime            @updatedAt
+
+  // Links to actual grade records
+  gradebookEntryId   String?  @unique
+  gradingSessionId   String?  @unique
+
+  student        Student        @relation(fields: [studentId],       references: [id], onDelete: Cascade)
+  syllabusEvent  SyllabusEvent  @relation(fields: [syllabusEventId], references: [id])
+  gradebookEntry GradebookEntry? @relation(fields: [gradebookEntryId], references: [id])
+  gradingSession GradingSession? @relation(fields: [gradingSessionId],  references: [id])
+
+  @@unique([studentId, syllabusEventId])
+  @@map("student_syllabus_events")
+}
+
+// ============================================================
+// ── DEAN'S CURRICULUM WEIGHTING MATRIX ──────────────────────
+// ============================================================
+
+// Track × SyllabusEvent → weight percentage
+// Sum of all weights for a given (classId, track) must = 100.0
+model CurriculumWeight {
+  id              String  @id @default(cuid())
+  track           Track
+  syllabusEventId String
+  weightPct       Float   // e.g. 5.0 = 5%
+  setByUserId     String? // Dean who set this
+  updatedAt       DateTime @updatedAt
+
+  syllabusEvent SyllabusEvent @relation(fields: [syllabusEventId], references: [id], onDelete: Cascade)
+
+  @@unique([track, syllabusEventId])
+  @@map("curriculum_weights")
+}
+
+// ============================================================
+// ── CONTENT VAULT ───────────────────────────────────────────
+// ============================================================
+
+model ContentFile {
+  id              String          @id @default(cuid())
+  title           String
+  description     String?         @db.Text
+  syllabusEventId String?         // which event this content supports
+  uploadedById    String
+  status          ContentStatus   @default(SANDBOX)
+  storageProvider StorageProvider @default(VERCEL_BLOB)
+  storageKey      String?         // provider-specific key/path
+  storageUrl      String?         // CDN/public URL
+  fileHash        String?         // SHA-256 for change detection
+  fileSizeBytes   Int?
+  mimeType        String?
+  fileName        String?
+  presentationCount Int           @default(0) // increments each class cohort
+  version         Int             @default(1)
+  previousVersionId String?       // self-ref: points to replaced file
+  isLatest        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  archivedAt      DateTime?
+
+  syllabusEvent   SyllabusEvent?  @relation(fields: [syllabusEventId], references: [id])
+  uploadedBy      User            @relation("ContentUploader", fields: [uploadedById], references: [id])
+  previousVersion ContentFile?    @relation("FileVersionHistory", fields: [previousVersionId], references: [id])
+  nextVersions    ContentFile[]   @relation("FileVersionHistory")
+  workflow        ContentWorkflow?
+  verifications   ContentVerification[]
+
+  @@map("content_files")
+}
+
+// Approval chain state for each file
+model ContentWorkflow {
+  id              String    @id @default(cuid())
+  contentFileId   String    @unique
+  submittedById   String
+  submittedAt     DateTime  @default(now())
+  chairReviewedById  String?
+  chairReviewedAt    DateTime?
+  chairNotes         String?  @db.Text
+  a9ReviewedById     String?
+  a9ReviewedAt       DateTime?
+  a9Notes            String?  @db.Text
+  currentStatus   ContentStatus @default(SANDBOX)
+  autoPublished   Boolean   @default(false)
+  updatedAt       DateTime  @updatedAt
+
+  contentFile ContentFile @relation(fields: [contentFileId], references: [id], onDelete: Cascade)
+  submittedBy User        @relation("WorkflowActor", fields: [submittedById], references: [id])
+
+  @@map("content_workflows")
+}
+
+// Class rollover verification — Course Owner confirms content for new cohort
+model ContentVerification {
+  id              String                    @id @default(cuid())
+  contentFileId   String
+  classId         String
+  verifiedById    String
+  verifiedAt      DateTime                  @default(now())
+  status          ContentVerificationStatus @default(PENDING)
+  autoPublished   Boolean                   @default(false)
+  notes           String?                   @db.Text
+
+  contentFile ContentFile @relation(fields: [contentFileId], references: [id])
+  class       Class       @relation(fields: [classId],       references: [id])
+  verifiedBy  User        @relation(fields: [verifiedById],  references: [id])
+
+  @@unique([contentFileId, classId])
+  @@map("content_verifications")
+}
+
+// ============================================================
+// ── DIGITAL SQUADRON CHAT ───────────────────────────────────
+// ============================================================
+
+model ChatChannel {
+  id               String          @id @default(cuid())
+  name             String          // e.g. "#pilot-track", "#tf-6241"
+  description      String?
+  type             ChatChannelType
+  classId          String?         // null = school-wide
+  trackFilter      Track?          // for TRACK channels
+  courseCode       String?         // for COURSE channels
+  deptCode         DepartmentCode? // for DEPARTMENT channels
+  isAutoProvisioned Boolean        @default(false)
+  isArchived       Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+
+  class    Class?              @relation(fields: [classId], references: [id])
+  messages ChatMessage[]
+  members  ChatChannelMember[]
+
+  @@unique([classId, name])
+  @@map("chat_channels")
+}
+
+model ChatMessage {
+  id          String    @id @default(cuid())
+  channelId   String
+  authorId    String
+  content     String    @db.Text
+  attachments Json?     // [{ name, url, mimeType, sizeBytes }]
+  sentAt      DateTime  @default(now())
+  editedAt    DateTime?
+  isDeleted   Boolean   @default(false)
+  replyToId   String?   // thread/reply support
+
+  channel  ChatChannel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author   User         @relation(fields: [authorId],  references: [id])
+  replyTo  ChatMessage? @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies  ChatMessage[] @relation("MessageReplies")
+
+  @@map("chat_messages")
+}
+
+model ChatChannelMember {
+  id          String   @id @default(cuid())
+  channelId   String
+  userId      String
+  joinedAt    DateTime @default(now())
+  lastReadAt  DateTime?
+  isMuted     Boolean  @default(false)
+
+  channel ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId],    references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@map("chat_channel_members")
+}
+
+// ============================================================
+// ── ENHANCED SURVEY MODULE ──────────────────────────────────
+// ============================================================
+
+// When a survey is deployed for a specific event/class
+model SurveyDeployment {
+  id              String    @id @default(cuid())
+  classId         String
+  syllabusEventId String?
+  surveyType      SurveyType
+  deployedById    String
+  deployedAt      DateTime  @default(now())
+  closesAt        DateTime?
+  isActive        Boolean   @default(true)
+  // Hardcoded metadata (locked at deploy time)
+  instructorName  String?
+  scenarioLabel   String?
+  trackFilter     Track?
+  customQuestions Json?     // [{ questionText, type, options? }]
+
+  class         Class         @relation(fields: [classId],         references: [id])
+  syllabusEvent SyllabusEvent? @relation(fields: [syllabusEventId], references: [id])
+  deployedBy    User           @relation(fields: [deployedById],    references: [id])
+  responses     SurveyResponseV2[]
+  sanitizedReport SurveySanitizedReport?
+
+  @@map("survey_deployments")
+}
+
+// Anonymized response linked to a deployment
+model SurveyResponseV2 {
+  id           String   @id @default(cuid())
+  deploymentId String
+  // No studentId — anonymized at submission
+  trackLabel   String?  // e.g. "PILOT" — retained for analytics
+  cohortLabel  String?  // e.g. "26A"
+  responses    Json
+  submittedAt  DateTime @default(now())
+
+  deployment SurveyDeployment @relation(fields: [deploymentId], references: [id])
+
+  @@map("survey_responses_v2")
+}
+
+// A9's sanitized PDF report for instructors
+model SurveySanitizedReport {
+  id              String    @id @default(cuid())
+  deploymentId    String    @unique
+  rawSummaryText  String?   @db.Text // A9's working draft
+  sanitizedText   String?   @db.Text // final sanitized content
+  pdfStorageKey   String?   // stored PDF key
+  pdfUrl          String?
+  publishedAt     DateTime?
+  publishedById   String?
+  recertTriggered Boolean   @default(false)
+  updatedAt       DateTime  @updatedAt
+
+  deployment  SurveyDeployment @relation(fields: [deploymentId], references: [id])
+  publishedBy User?            @relation(fields: [publishedById], references: [id])
+
+  @@map("survey_sanitized_reports")
+}
+
+// ============================================================
+// ── FLIGHT SCHEDULE INTEGRATION ─────────────────────────────
+// ============================================================
+
+model FlightScheduleSync {
+  id          String   @id @default(cuid())
+  sheetId     String
+  tabGid      String
+  syncedAt    DateTime @default(now())
+  status      String   // "success" | "error"
+  errorMsg    String?
+  rowsIngested Int     @default(0)
+
+  @@map("flight_schedule_syncs")
+}
+
+model FlightScheduleEntry {
+  id              String   @id @default(cuid())
+  syncId          String
+  classId         String?
+  scheduleDate    DateTime @db.Date
+  studentName     String   // raw from sheet
+  studentId       String?  // resolved FK (nullable — may not match)
+  eventType       String   // "FLIGHT" | "GROUND" | "NA"
+  eventTime       String?  // "08:00"
+  courseCode      String?
+  aircraft        String?
+  notes           String?
+  prerequisitesMet Boolean? // null = not checked yet
+
+  class   Class?   @relation(fields: [classId],   references: [id])
+
+  @@map("flight_schedule_entries")
+}
+
+// ============================================================
+// ── EARLY WARNING / ANALYTICS ───────────────────────────────
+// ============================================================
+
+model StudentAlert {
+  id          String        @id @default(cuid())
+  studentId   String
+  type        AlertType
+  severity    AlertSeverity @default(WARNING)
+  message     String        @db.Text
+  metadata    Json?         // e.g. { competency: "1.2", scores: [85, 80, 75] }
+  isResolved  Boolean       @default(false)
+  resolvedAt  DateTime?
+  resolvedById String?
+  createdAt   DateTime      @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("student_alerts")
+}
+
+// ============================================================
+// ── LEGACY V2 MODELS (preserved exactly) ────────────────────
+// ============================================================
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  lastLoginAt  DateTime?
+  // Bridge to new User model (populated during migration)
+  userId       String?   @unique
+
+  @@map("admin_users")
+}
+
+model StaffMember {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  // Bridge to new User model
+  userId    String?  @unique
+
+  userAccount User?              @relation("StaffUser", fields: [userId], references: [id])
+  assessments GraderAssessment[]
+
+  @@map("staff_members")
+}
+
+model Scenario {
+  id       String  @id @default(cuid())
+  number   Int     @unique
+  label    String
+  isActive Boolean @default(true)
+
+  sessions GradingSession[]
+
+  @@map("scenarios")
+}
+
+model Criterion {
+  id             String  @id @default(cuid())
+  code           String
+  pillar         Pillar
+  name           String
+  weight         Float
+  outcomesRefs   String
+  description    String  @db.Text
+  waaDescriptor  String  @db.Text
+  avgDescriptor  String  @db.Text
+  failDescriptor String  @db.Text
+  sortOrder      Int
+  isActive       Boolean @default(true)
+  classId        String?
+
+  class  Class?          @relation(fields: [classId], references: [id], onDelete: Cascade)
+  grades CriterionGrade[]
+
+  @@map("criteria")
+}
 
 model GradingSession {
   id             String        @id @default(cuid())
   classId        String
   studentId      String
   scenarioId     String
+  syllabusEventId String?      // NEW: links session to MCG event
   status         SessionStatus @default(OPEN)
-  finalScore     Float?        // calculated weighted average
-  // Official output score — for a passing retake this is capped at exactly 70.0
+  finalScore     Float?
   outputScore    Float?
   hasFail        Boolean       @default(false)
-  // Retake tracking
   isRetake       Boolean       @default(false)
-  retakeSourceId String?       // FK to the original failed session
+  retakeSourceId String?
   createdAt      DateTime      @default(now())
   finalizedAt    DateTime?
 
-  class        Class              @relation(fields: [classId], references: [id])
-  student      Student            @relation(fields: [studentId], references: [id])
+  class        Class              @relation(fields: [classId],    references: [id])
+  student      Student            @relation(fields: [studentId],  references: [id])
   scenario     Scenario           @relation(fields: [scenarioId], references: [id])
   assessments  GraderAssessment[]
   retakeSource GradingSession?    @relation("RetakeSessions", fields: [retakeSourceId], references: [id])
   retakes      GradingSession[]   @relation("RetakeSessions")
+  studentSyllabusEvent StudentSyllabusEvent?
 
   @@map("grading_sessions")
 }
-
-enum SessionStatus {
-  OPEN
-  PENDING_RESOLUTION
-  READY_TO_FINALIZE
-  FINALIZED
-}
-
-// ============================================================
-// GRADER ASSESSMENTS
-// ============================================================
 
 model GraderAssessment {
   id            String    @id @default(cuid())
@@ -213,17 +831,13 @@ model GraderAssessment {
   submittedAt   DateTime?
   createdAt     DateTime  @default(now())
 
-  session     GradingSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session     GradingSession   @relation(fields: [sessionId],     references: [id], onDelete: Cascade)
   staffMember StaffMember      @relation(fields: [staffMemberId], references: [id])
   grades      CriterionGrade[]
 
   @@unique([sessionId, staffMemberId])
   @@map("grader_assessments")
 }
-
-// ============================================================
-// CRITERION GRADES
-// ============================================================
 
 model CriterionGrade {
   id              String     @id @default(cuid())
@@ -237,20 +851,11 @@ model CriterionGrade {
   submittedAt     DateTime   @default(now())
 
   assessment GraderAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  criterion  Criterion        @relation(fields: [criterionId], references: [id])
+  criterion  Criterion        @relation(fields: [criterionId],  references: [id])
 
   @@unique([assessmentId, criterionId])
   @@map("criterion_grades")
 }
-
-enum EditSource {
-  GRADER
-  PANEL_CHAIR
-}
-
-// ============================================================
-// SURVEYS
-// ============================================================
 
 model SurveyQuestionTemplate {
   id           String       @id @default(cuid())
@@ -267,20 +872,6 @@ model SurveyQuestionTemplate {
   class Class? @relation(fields: [classId], references: [id], onDelete: Cascade)
 
   @@map("survey_question_templates")
-}
-
-enum SurveyType {
-  STUDENT
-  INSTRUCTOR
-}
-
-enum QuestionType {
-  TEXT
-  MULTIPLE_CHOICE
-  MULTI_SELECT
-  LIKERT
-  DATE
-  NUMBER
 }
 
 model StudentSurveyResponse {
@@ -306,40 +897,118 @@ model InstructorSurveyResponse {
 }
 
 // ============================================================
-// THE SANDBOX — completely independent from Comp Oral
+// ── GRADEBOOK SYSTEM (v2 preserved, extended) ───────────────
 // ============================================================
 
-enum SandboxQuestionType {
-  GRADE_1_8         // TPS 1-8 scale with WAA→Fail labels
-  NUMERIC           // custom min–max scale, admin-defined point map
-  MULTIPLE_CHOICE   // single answer from a list
-  CHECKBOX          // multiple answers from a list
-  TEXT              // free-text response
-  NUMBER            // open numeric entry
-  REPEATING_SECTION // group + individual: answered once for the group, repeated per person
+model GradebookInstructor {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  pinHash   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  // Bridge to new User model
+  userId    String?  @unique
+
+  @@map("gradebook_instructors")
 }
 
-enum SandboxMode {
-  SURVEY  // everyone submits for themselves (no subject field)
-  GRADER  // evaluators rate a named subject
+model GradesheetTemplate {
+  id            String         @id @default(cuid())
+  courseCode    String
+  title         String
+  type          GradesheetType
+  tracks        Track[]
+  airmanshipPct Float          @default(0)
+  bonusMaxPct   Float          @default(0)
+  isActive      Boolean        @default(true)
+  archivedAt    DateTime?
+  notes         String?        @db.Text
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  tasks          GradesheetTask[]
+  entries        GradebookEntry[]
+  syllabusEvents SyllabusEvent[]  // back-relation from SyllabusEvent
+
+  @@map("gradesheet_templates")
 }
 
-enum SandboxSubjectEntry {
-  FREE_TEXT
-  PREDEFINED_LIST
+model GradesheetTask {
+  id             String  @id @default(cuid())
+  templateId     String
+  sortOrder      Int
+  sectionLabel   String?
+  isAirmanship   Boolean @default(false)
+  isBonus        Boolean @default(false)
+  isDemo         Boolean @default(false)
+  label          String
+  minScore       Int?
+  minScoreHard   Boolean @default(false)
+  desiredScore   Int?
+  weight         Float   @default(0)
+  numberRequired Int     @default(1)
+
+  template GradesheetTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  scores   GradebookTaskScore[]
+
+  @@map("gradesheet_tasks")
 }
 
-enum SandboxGraderEntry {
-  FREE_TEXT
-  STAFF_LIST
+model GradebookEntry {
+  id             String               @id @default(cuid())
+  studentId      String
+  templateId     String
+  syllabusEventId String?             // NEW: links entry to MCG event
+  instructorId   String?             // NEW: links entry to User instructor
+  status         GradebookEntryStatus @default(NOT_STARTED)
+  isLocked       Boolean              @default(false)
+  instructorName String?
+  submittedAt    DateTime?
+  overallScore   Float?
+  academicPass   Boolean?
+  airmanshipPass Boolean?
+  overallPass    Boolean?
+  comments       String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  student      Student            @relation(fields: [studentId],  references: [id], onDelete: Cascade)
+  template     GradesheetTemplate @relation(fields: [templateId], references: [id])
+  instructor   User?              @relation("EntryInstructor", fields: [instructorId], references: [id])
+  scores       GradebookTaskScore[]
+  studentSyllabusEvent StudentSyllabusEvent?
+
+  @@unique([studentId, templateId])
+  @@map("gradebook_entries")
 }
 
-// Creator invite — admin generates and emails to someone who wants to build a form
+model GradebookTaskScore {
+  id                 String  @id @default(cuid())
+  entryId            String
+  taskId             String
+  scoreEntered       Int?
+  numberAccomplished Int?
+  isNA               Boolean @default(false)
+  scoreAwarded       Float?
+  isAutoFail         Boolean @default(false)
+  comments           String? @db.Text
+
+  entry GradebookEntry  @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  task  GradesheetTask  @relation(fields: [taskId],  references: [id])
+
+  @@unique([entryId, taskId])
+  @@map("gradebook_task_scores")
+}
+
+// ============================================================
+// ── SANDBOX (v2 preserved exactly) ──────────────────────────
+// ============================================================
+
 model SandboxCreatorInvite {
   id             String    @id @default(cuid())
   recipientName  String
   recipientEmail String
-  formSubject    String    // admin label, e.g. "Mission Systems Check — Maj. Smith"
+  formSubject    String
   linkToken      String    @unique
   pinHash        String
   sentAt         DateTime  @default(now())
@@ -352,7 +1021,6 @@ model SandboxCreatorInvite {
   @@map("sandbox_creator_invites")
 }
 
-// The form itself — created by a creator via their invite link (or directly by admin)
 model SandboxForm {
   id                 String              @id @default(cuid())
   inviteId           String?             @unique
@@ -362,14 +1030,13 @@ model SandboxForm {
   mode               SandboxMode         @default(SURVEY)
   subjectEntry       SandboxSubjectEntry @default(FREE_TEXT)
   graderEntry        SandboxGraderEntry  @default(FREE_TEXT)
-  predefinedSubjects Json?               // string[] — if subjectEntry = PREDEFINED_LIST
+  predefinedSubjects Json?
   scoringEnabled     Boolean             @default(false)
-  // Each form has two independent PIN-protected access points
   submitSlug         String              @unique
   resultsSlug        String              @unique
   submitPinHash      String
   resultsPinHash     String
-  samePinWarning     Boolean             @default(false) // true if submit == results PIN
+  samePinWarning     Boolean             @default(false)
   isActive           Boolean             @default(true)
   createdAt          DateTime            @default(now())
 
@@ -381,11 +1048,10 @@ model SandboxForm {
   @@map("sandbox_forms")
 }
 
-// Admin grants one form's results-viewer read access to another form's results
 model SandboxResultsAccess {
   id              String   @id @default(cuid())
-  grantedToFormId String   // the form whose results-PIN-holder gets access
-  targetFormId    String   // the form they can read
+  grantedToFormId String
+  targetFormId    String
   grantedByAdmin  String
   grantedAt       DateTime @default(now())
 
@@ -396,157 +1062,33 @@ model SandboxResultsAccess {
   @@map("sandbox_results_access")
 }
 
-// A question on a sandbox form
 model SandboxQuestion {
   id            String               @id @default(cuid())
   formId        String
   form          SandboxForm          @relation(fields: [formId], references: [id], onDelete: Cascade)
   questionType  SandboxQuestionType
-  label         String               // question text shown to respondent
+  label         String
   description   String?              @db.Text
-  sectionLabel  String?              // optional section grouping header
-  options       Json?                // string[] for MC/checkbox
-  scaleMin      Int?                 // NUMERIC: minimum value
-  scaleMax      Int?                 // NUMERIC: maximum value
-  // pointMap: { "1": 100, "2": 80, ... } — linear auto-generated, overridable
-  // For GRADE_1_8: uses standard NUMERIC_MAP
+  sectionLabel  String?
+  options       Json?
+  scaleMin      Int?
+  scaleMax      Int?
   pointMap      Json?
-  weight        Float?               // fraction (0-1) used when scoringEnabled; must sum to 1 across all weighted questions
+  weight        Float?
   isRequired    Boolean              @default(true)
   sortOrder     Int
 
   @@map("sandbox_questions")
 }
 
-// ============================================================
-// GRADEBOOK SYSTEM
-// ============================================================
-
-enum GradesheetType {
-  FLIGHT
-  REPORT
-  ORAL
-  SIM
-  CONTROL_ROOM
-}
-
-enum GradebookEntryStatus {
-  NOT_STARTED
-  IN_PROGRESS
-  SUBMITTED
-}
-
-// Instructor account
-model GradebookInstructor {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  pinHash   String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-
-  @@map("gradebook_instructors")
-}
-
-// A gradesheet template — the pool of reusable event definitions
-model GradesheetTemplate {
-  id            String         @id @default(cuid())
-  courseCode    String         // e.g. "PF 6121F"
-  title         String         // human-readable name
-  type          GradesheetType
-  tracks        Track[]        // which tracks this applies to
-  airmanshipPct Float          @default(0)  // fraction e.g. 0.20
-  bonusMaxPct   Float          @default(0)
-  isActive      Boolean        @default(true)
-  archivedAt    DateTime?
-  notes         String?        @db.Text
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  tasks   GradesheetTask[]
-  entries GradebookEntry[]
-
-  @@map("gradesheet_templates")
-}
-
-// A task (row) within a gradesheet template
-model GradesheetTask {
-  id             String  @id @default(cuid())
-  templateId     String
-  sortOrder      Int
-  sectionLabel   String?  // e.g. "Test Conduct", "Airmanship Tasks"
-  isAirmanship   Boolean  @default(false)
-  isBonus        Boolean  @default(false)
-  isDemo         Boolean  @default(false)  // NG/Demo — not scored
-  label          String
-  minScore       Int?     // 0-4; null for demo tasks
-  minScoreHard   Boolean  @default(false)  // asterisk (*) — auto-fail if below
-  desiredScore   Int?     // 0-4
-  weight         Float    @default(0)      // fraction e.g. 0.04
-  numberRequired Int      @default(1)
-
-  template GradesheetTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  scores   GradebookTaskScore[]
-
-  @@map("gradesheet_tasks")
-}
-
-// One instructor's completed gradesheet for one student
-model GradebookEntry {
-  id             String               @id @default(cuid())
-  studentId      String
-  templateId     String
-  status         GradebookEntryStatus @default(NOT_STARTED)
-  isLocked       Boolean              @default(false)
-  instructorName String?
-  submittedAt    DateTime?
-  overallScore   Float?   // weighted total, floored at 69 if any fail
-  academicPass   Boolean? // stoplight: no hard-min academic failure
-  airmanshipPass Boolean? // stoplight: no hard-min airmanship failure
-  overallPass    Boolean?
-  comments       String?  @db.Text
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  student  Student            @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  template GradesheetTemplate @relation(fields: [templateId], references: [id])
-  scores   GradebookTaskScore[]
-
-  @@unique([studentId, templateId])
-  @@map("gradebook_entries")
-}
-
-// Individual task scores within a gradesheet entry
-model GradebookTaskScore {
-  id                 String  @id @default(cuid())
-  entryId            String
-  taskId             String
-  scoreEntered       Int?    // 0-4
-  numberAccomplished Int?    // defaults to 1 if not set; 0 = not accomplished
-  isNA               Boolean @default(false)  // task marked N/A — excluded from scoring
-  scoreAwarded       Float?  // percentage from lookup table (post-proration)
-  isAutoFail         Boolean @default(false)
-  comments           String? @db.Text
-
-  entry GradebookEntry  @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  task  GradesheetTask  @relation(fields: [taskId], references: [id])
-
-  @@unique([entryId, taskId])
-  @@map("gradebook_task_scores")
-}
-
-// ============================================================
-// SANDBOX SUBMISSIONS
-// ============================================================
-
-// A single form submission
 model SandboxSubmission {
   id           String      @id @default(cuid())
   formId       String
   form         SandboxForm @relation(fields: [formId], references: [id], onDelete: Cascade)
-  subjectName  String?     // null in SURVEY mode or if not collected
+  subjectName  String?
   graderName   String?
-  answers      Json        // { questionId: value (string | string[] | number) }
-  totalScore   Float?      // null if scoringEnabled=false
+  answers      Json
+  totalScore   Float?
   submittedAt  DateTime    @default(now())
 
   @@map("sandbox_submissions")

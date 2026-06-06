@@ -1,0 +1,375 @@
+'use client'
+
+import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
+import type { ChannelSummary } from './actions'
+import { sendMessageAction } from './actions'
+import type { UserRole } from '@prisma/client'
+
+type RawMessage = {
+  id:        string
+  content:   string
+  sentAt:    string
+  editedAt?: string | null
+  author: {
+    id:        string
+    firstName: string
+    lastName:  string
+    role:      UserRole
+  }
+}
+
+const ROLE_BADGE: Partial<Record<UserRole, string>> = {
+  SYSTEM_ADMIN:    'bg-purple-100 text-purple-700',
+  DEAN_COMMANDER:  'bg-tps-navy/10 text-tps-navy',
+  A9_STANDARDS:    'bg-amber-100 text-amber-700',
+  DEPT_CHAIR:      'bg-blue-100 text-blue-700',
+  LINE_INSTRUCTOR: 'bg-gray-100 text-gray-600',
+}
+
+const ROLE_SHORT: Partial<Record<UserRole, string>> = {
+  SYSTEM_ADMIN:    'SysAdmin',
+  DEAN_COMMANDER:  'Dean',
+  A9_STANDARDS:    'A9',
+  DEPT_CHAIR:      'Chair',
+  LINE_INSTRUCTOR: 'Instructor',
+  STUDENT:         'Student',
+}
+
+const TYPE_ICON: Record<string, string> = {
+  CLASS:      '🏫',
+  TRACK:      '✈',
+  DEPARTMENT: '🏢',
+  GENERAL:    '💬',
+  DIRECT:     '👤',
+  COURSE:     '📖',
+}
+
+function MessageBubble({ msg, isOwn }: { msg: RawMessage; isOwn: boolean }) {
+  const time    = new Date(msg.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const name    = `${msg.author.firstName} ${msg.author.lastName}`.trim()
+  const badge   = ROLE_BADGE[msg.author.role]
+  const roleStr = ROLE_SHORT[msg.author.role] ?? msg.author.role
+
+  if (isOwn) {
+    return (
+      <div className="flex flex-col items-end gap-0.5">
+        <div className="max-w-[80%] bg-tps-navy text-white rounded-2xl rounded-br-sm px-3.5 py-2 shadow-sm">
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
+        </div>
+        <span className="text-[10px] text-gray-400 px-1">{time}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <div className="flex items-center gap-1.5 px-1">
+        <span className="text-xs font-semibold text-gray-700">{name}</span>
+        {badge && (
+          <span className={`text-[9px] font-bold px-1 py-0.5 rounded uppercase tracking-wide ${badge}`}>
+            {roleStr}
+          </span>
+        )}
+      </div>
+      <div className="max-w-[80%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-3.5 py-2 shadow-sm">
+        <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-gray-800">{msg.content}</p>
+      </div>
+      <span className="text-[10px] text-gray-400 px-1">{time}</span>
+    </div>
+  )
+}
+
+function MessageList({
+  messages,
+  currentUserId,
+  bottomRef,
+}: {
+  messages: RawMessage[]
+  currentUserId: string
+  bottomRef: React.RefObject<HTMLDivElement | null>
+}) {
+  if (messages.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-gray-400 text-sm p-4">
+        No messages yet. Be the first to say something.
+      </div>
+    )
+  }
+
+  // Group consecutive messages by author into blocks
+  const blocks: { authorId: string; msgs: RawMessage[] }[] = []
+  for (const m of messages) {
+    const last = blocks[blocks.length - 1]
+    if (last && last.authorId === m.author.id) {
+      last.msgs.push(m)
+    } else {
+      blocks.push({ authorId: m.author.id, msgs: [m] })
+    }
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      {blocks.map((block, bi) => {
+        const isOwn = block.authorId === currentUserId
+        return (
+          <div key={bi} className={`flex flex-col gap-1 ${isOwn ? 'items-end' : 'items-start'}`}>
+            {block.msgs.map((m) => (
+              <MessageBubble key={m.id} msg={m} isOwn={isOwn} />
+            ))}
+          </div>
+        )
+      })}
+      <div ref={bottomRef} />
+    </div>
+  )
+}
+
+function MessageInput({
+  onSend,
+  disabled,
+}: {
+  onSend: (text: string) => void
+  disabled: boolean
+}) {
+  const [text, setText] = useState('')
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      submit()
+    }
+  }
+
+  function submit() {
+    const trimmed = text.trim()
+    if (!trimmed || disabled) return
+    onSend(trimmed)
+    setText('')
+  }
+
+  return (
+    <div className="border-t border-gray-200 bg-white px-4 py-3 flex items-end gap-2">
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={handleKeyDown}
+        disabled={disabled}
+        rows={1}
+        placeholder="Message… (Enter to send, Shift+Enter for newline)"
+        className="flex-1 resize-none rounded-xl border border-gray-300 px-3 py-2.5 text-sm
+                   focus:outline-none focus:ring-2 focus:ring-tps-navy/30 focus:border-tps-navy
+                   disabled:bg-gray-50 disabled:text-gray-400
+                   max-h-32 overflow-y-auto"
+        style={{ minHeight: '44px' }}
+      />
+      <button
+        type="button"
+        onClick={submit}
+        disabled={disabled || !text.trim()}
+        className="min-h-[44px] min-w-[44px] rounded-xl bg-tps-navy text-white flex items-center justify-center
+                   hover:bg-tps-navy/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        aria-label="Send message"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
+// ── Main Shell ────────────────────────────────────────────────────────────────
+
+type Props = {
+  channels:      ChannelSummary[]
+  currentUserId: string
+  className:     string
+}
+
+const POLL_INTERVAL_MS = 3000
+
+export function ChatShell({ channels, currentUserId, className }: Props) {
+  const [activeChannelId, setActiveChannelId] = useState<string>(channels[0]?.id ?? '')
+  const [messages,        setMessages]         = useState<RawMessage[]>([])
+  const [sidebarOpen,     setSidebarOpen]       = useState(false)
+  const [sendPending,     startSend]            = useTransition()
+  const [sendError,       setSendError]         = useState<string | null>(null)
+
+  const bottomRef   = useRef<HTMLDivElement>(null)
+  const latestSince = useRef<string | null>(null)
+  const pollerRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const activeChannel = channels.find(c => c.id === activeChannelId)
+
+  // ── Initial load + polling ────────────────────────────────────────────────
+
+  const fetchMessages = useCallback(async (channelId: string, since: string | null) => {
+    try {
+      const url = `/api/chat/messages?channelId=${channelId}${since ? `&since=${encodeURIComponent(since)}` : ''}`
+      const res = await fetch(url)
+      if (!res.ok) return
+
+      const data = await res.json() as { messages: RawMessage[] }
+      if (data.messages.length > 0) {
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id))
+          const newOnes = data.messages.filter(m => !existingIds.has(m.id))
+          return since ? [...prev, ...newOnes] : data.messages
+        })
+        latestSince.current = data.messages[data.messages.length - 1].sentAt
+      }
+    } catch {
+      // network error — poll will retry
+    }
+  }, [])
+
+  // Switch channel: load fresh
+  useEffect(() => {
+    if (!activeChannelId) return
+
+    setMessages([])
+    latestSince.current = null
+
+    // Load last ~50 messages (no `since` = full initial load)
+    fetchMessages(activeChannelId, null)
+
+    // Start polling
+    if (pollerRef.current) clearInterval(pollerRef.current)
+    pollerRef.current = setInterval(() => {
+      fetchMessages(activeChannelId, latestSince.current)
+    }, POLL_INTERVAL_MS)
+
+    return () => {
+      if (pollerRef.current) clearInterval(pollerRef.current)
+    }
+  }, [activeChannelId, fetchMessages])
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // ── Send message ──────────────────────────────────────────────────────────
+
+  function handleSend(text: string) {
+    setSendError(null)
+    startSend(async () => {
+      const result = await sendMessageAction(activeChannelId, text)
+      if (!result.ok) {
+        setSendError(result.error ?? 'Failed to send')
+        return
+      }
+      // Immediately refetch (don't wait for next poll cycle)
+      await fetchMessages(activeChannelId, latestSince.current)
+    })
+  }
+
+  if (channels.length === 0) {
+    return (
+      <div className="card text-center py-16 text-gray-400">
+        No channels found for this class. Channels are auto-provisioned when the class has students.
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-[calc(100vh-10rem)] border border-gray-200 rounded-xl overflow-hidden bg-gray-50 shadow-sm">
+
+      {/* ── Sidebar ─────────────────────────────────────────────────── */}
+      <aside className={`
+        flex-shrink-0 w-64 bg-tps-navy text-white flex flex-col
+        md:relative md:translate-x-0
+        absolute inset-y-0 left-0 z-20 transition-transform duration-200
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+      `}>
+        <div className="px-4 py-3 border-b border-white/10">
+          <p className="text-xs font-bold text-white/60 uppercase tracking-wider">Digital Squadron</p>
+          <p className="text-sm font-semibold">Class {className}</p>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto py-2">
+          {channels.map((ch) => (
+            <button
+              key={ch.id}
+              onClick={() => { setActiveChannelId(ch.id); setSidebarOpen(false) }}
+              className={`w-full text-left px-4 py-2.5 flex items-start gap-2 transition-colors
+                ${activeChannelId === ch.id
+                  ? 'bg-white/15 text-white'
+                  : 'text-white/70 hover:bg-white/10 hover:text-white'
+                }`}
+            >
+              <span className="text-sm mt-0.5 shrink-0">{TYPE_ICON[ch.type] ?? '💬'}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium truncate">{ch.name}</p>
+                {ch.lastMessage && (
+                  <p className="text-[10px] text-white/50 truncate">
+                    {ch.lastMessage.authorName}: {ch.lastMessage.content}
+                  </p>
+                )}
+              </div>
+            </button>
+          ))}
+        </nav>
+
+        <div className="px-4 py-2 border-t border-white/10 text-[10px] text-white/40">
+          Channels auto-provisioned per track/class
+        </div>
+      </aside>
+
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && (
+        <div
+          className="absolute inset-0 bg-black/30 z-10 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* ── Main content ─────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0">
+
+        {/* Channel header */}
+        <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
+          {/* Mobile hamburger */}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="md:hidden text-gray-500 hover:text-tps-navy"
+            aria-label="Toggle channels"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-tps-navy truncate">{activeChannel?.name ?? '—'}</p>
+            {activeChannel?.description && (
+              <p className="text-xs text-gray-400 truncate">{activeChannel.description}</p>
+            )}
+          </div>
+
+          <span className="text-xs text-gray-400 hidden sm:block">
+            {messages.length} messages
+          </span>
+        </div>
+
+        {/* Messages */}
+        <MessageList
+          messages={messages}
+          currentUserId={currentUserId}
+          bottomRef={bottomRef}
+        />
+
+        {/* Error toast */}
+        {sendError && (
+          <div className="mx-4 mb-2 rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-xs text-red-700 flex justify-between">
+            {sendError}
+            <button onClick={() => setSendError(null)} className="ml-2 text-red-400 hover:text-red-600">×</button>
+          </div>
+        )}
+
+        {/* Input */}
+        <MessageInput onSend={handleSend} disabled={sendPending} />
+      </div>
+    </div>
+  )
+}

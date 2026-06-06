@@ -28,7 +28,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <form
             action={async () => {
               'use server'
-              await signOut({ redirectTo: '/admin/login' })
+              await signOut({ redirectTo: '/login' })
             }}
           >
             <button type="submit" className="text-tps-silver text-xs hover:text-white min-h-[44px] px-2">

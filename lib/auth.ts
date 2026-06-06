@@ -1,6 +1,7 @@
 /**
  * Full Auth.js config — Node.js runtime only.
  * NOT imported by middleware.ts.
+ * Authenticates against the unified User model (replaces AdminUser-only check).
  */
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
@@ -10,7 +11,7 @@ import { z } from 'zod'
 import { authConfig } from '@/auth.config'
 
 const loginSchema = z.object({
-  username: z.string().min(1),
+  email:    z.string().email(),
   password: z.string().min(1),
 })
 
@@ -20,27 +21,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Credentials({
       name: 'credentials',
       credentials: {
-        username: { label: 'Username', type: 'text' },
+        email:    { label: 'Email',    type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
         const parsed = loginSchema.safeParse(credentials)
         if (!parsed.success) return null
 
-        const admin = await db.adminUser.findUnique({
-          where: { username: parsed.data.username },
+        const user = await db.user.findUnique({
+          where: { email: parsed.data.email },
         })
-        if (!admin) return null
+        if (!user || !user.isActive) return null
 
-        const valid = await bcrypt.compare(parsed.data.password, admin.passwordHash)
+        const valid = await bcrypt.compare(parsed.data.password, user.passwordHash)
         if (!valid) return null
 
-        await db.adminUser.update({
-          where: { id: admin.id },
+        await db.user.update({
+          where: { id: user.id },
           data: { lastLoginAt: new Date() },
         })
 
-        return { id: admin.id, name: admin.username, email: null }
+        return {
+          id:        user.id,
+          email:     user.email,
+          role:      user.role,
+          firstName: user.firstName,
+          lastName:  user.lastName,
+        }
       },
     }),
   ],
