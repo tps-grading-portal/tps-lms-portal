@@ -33,7 +33,7 @@ export default async function ClassesPage() {
 
       <div className="grid gap-3">
         {classes.map(c => (
-          <a
+          <Link
             key={c.id}
             href={`/portal/classes/${c.id}`}
             className="card flex items-center justify-between hover:border-tps-orange transition-colors group"
@@ -47,7 +47,7 @@ export default async function ClassesPage() {
             <svg className="w-4 h-4 text-gray-400 group-hover:text-tps-orange transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
             </svg>
-          </a>
+          </Link>
         ))}
       </div>
     </div>

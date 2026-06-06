@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { auth } from '@/lib/auth'
 import { can } from '@/lib/permissions'
 import { redirect } from 'next/navigation'
@@ -33,9 +34,9 @@ export default async function UsersPage() {
           <h1 className="text-2xl font-bold text-tps-navy">User Management</h1>
           <p className="text-gray-500 text-sm">{users.length} portal accounts</p>
         </div>
-        <a href="/portal/users/new" className="btn-primary text-sm px-4 py-2">
+        <Link href="/portal/users/new" className="btn-primary text-sm px-4 py-2">
           + Add User
-        </a>
+        </Link>
       </div>
 
       <div className="card overflow-hidden p-0">
@@ -53,9 +54,9 @@ export default async function UsersPage() {
             {users.map(u => (
               <tr key={u.id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-4 py-3 font-medium text-tps-navy">
-                  <a href={`/portal/users/${u.id}`} className="hover:underline">
+                  <Link href={`/portal/users/${u.id}`} className="hover:underline">
                     {u.lastName}, {u.firstName}
-                  </a>
+                  </Link>
                 </td>
                 <td className="px-4 py-3 text-gray-600">{u.email}</td>
                 <td className="px-4 py-3">
