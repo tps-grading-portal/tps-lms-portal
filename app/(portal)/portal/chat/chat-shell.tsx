@@ -102,10 +102,10 @@ function MessageBubble({ msg, isOwn }: { msg: RawMessage; isOwn: boolean }) {
 
   if (isOwn) {
     return (
-      <div className="flex flex-col items-end gap-0.5">
-        <div className="max-w-[80%] bg-tps-navy text-white rounded-2xl rounded-br-sm px-3.5 py-2 shadow-sm">
+      <div className="flex flex-col items-end gap-0.5 w-full">
+        <div className="max-w-[95%] sm:max-w-[85%] bg-tps-navy text-white rounded-2xl rounded-br-sm px-4 py-2.5 shadow-sm">
           {msg.content && (
-            <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
+            <p className="text-[15px] leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
           )}
           {atts.length > 0 && <AttachmentView attachments={atts} onDark />}
         </div>
@@ -115,7 +115,7 @@ function MessageBubble({ msg, isOwn }: { msg: RawMessage; isOwn: boolean }) {
   }
 
   return (
-    <div className="flex flex-col items-start gap-0.5">
+    <div className="flex flex-col items-start gap-0.5 w-full">
       <div className="flex items-center gap-1.5 px-1">
         <span className="text-xs font-semibold text-gray-700">{name}</span>
         {badge && (
@@ -124,9 +124,9 @@ function MessageBubble({ msg, isOwn }: { msg: RawMessage; isOwn: boolean }) {
           </span>
         )}
       </div>
-      <div className="max-w-[80%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-3.5 py-2 shadow-sm">
+      <div className="max-w-[95%] sm:max-w-[85%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-2.5 shadow-sm">
         {msg.content && (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-gray-800">{msg.content}</p>
+          <p className="text-[15px] leading-relaxed whitespace-pre-wrap break-words text-gray-800">{msg.content}</p>
         )}
         {atts.length > 0 && <AttachmentView attachments={atts} onDark={false} />}
       </div>
@@ -473,6 +473,27 @@ export function ChatShell({ channels, currentUserId, className, classId }: Props
   const [sendPending,     startSend]            = useTransition()
   const [sendError,       setSendError]         = useState<string | null>(null)
   const [newChannelOpen,  setNewChannelOpen]    = useState(false)
+  const [unreadByChannel, setUnreadByChannel]   = useState<Record<string, number>>({})
+
+  // Per-channel unread counts — badge beside each channel, cleared on read
+  const loadUnread = useCallback(async () => {
+    try {
+      const res = await fetch('/api/chat/unread')
+      if (!res.ok) return
+      const data = await res.json()
+      setUnreadByChannel(data.byChannel ?? {})
+    } catch { /* retry next poll */ }
+  }, [])
+
+  useEffect(() => {
+    loadUnread()
+    const interval = setInterval(loadUnread, 15_000)
+    window.addEventListener('tps-chat-read', loadUnread)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('tps-chat-read', loadUnread)
+    }
+  }, [loadUnread])
 
   async function handleArchiveChannel(ch: ChannelSummary) {
     if (!confirm(`Archive ${ch.name}? Messages are preserved but the channel is hidden.`)) return
@@ -595,18 +616,30 @@ export function ChatShell({ channels, currentUserId, className, classId }: Props
                 }`}
             >
               <button
-                onClick={() => { setActiveChannelId(ch.id); setSidebarOpen(false) }}
+                onClick={() => {
+                  setActiveChannelId(ch.id)
+                  setSidebarOpen(false)
+                  // Optimistically clear this channel's badge — it's being read
+                  setUnreadByChannel(prev => ({ ...prev, [ch.id]: 0 }))
+                }}
                 className="flex-1 min-w-0 text-left px-4 py-2.5 flex items-start gap-2"
               >
                 <span className="text-sm mt-0.5 shrink-0">{ch.isPrivate ? '🔒' : (TYPE_ICON[ch.type] ?? '💬')}</span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{ch.name}</p>
+                  <p className={`text-sm truncate ${(unreadByChannel[ch.id] ?? 0) > 0 && ch.id !== activeChannelId ? 'font-bold text-white' : 'font-medium'}`}>
+                    {ch.name}
+                  </p>
                   {ch.lastMessage && (
                     <p className="text-[10px] text-white/50 truncate">
                       {ch.lastMessage.authorName}: {ch.lastMessage.content || '📎 attachment'}
                     </p>
                   )}
                 </div>
+                {(unreadByChannel[ch.id] ?? 0) > 0 && ch.id !== activeChannelId && (
+                  <span className="mt-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-tps-orange text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                    {unreadByChannel[ch.id] > 99 ? '99+' : unreadByChannel[ch.id]}
+                  </span>
+                )}
               </button>
               {ch.canManage && (
                 <button

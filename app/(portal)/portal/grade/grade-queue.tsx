@@ -221,22 +221,38 @@ function StudentSection({
 
 // ── Main queue ────────────────────────────────────────────────────────────────
 
+// Track display order within a class
+const TRACK_ORDER: Track[] = ['PILOT', 'CSO_WSO', 'RPA', 'FTE', 'ABM', 'OPERATOR']
+
 export function GradeQueue({ entries }: { entries: GradeQueueEntry[] }) {
   const [filter,           setFilter]           = useState<Filter>('all')
   const [search,           setSearch]           = useState('')
   const [qrEntryId,        setQrEntryId]        = useState<string | null>(null)
   const [expandedStudents, setExpandedStudents] = useState<Set<string>>(new Set())
   const [expandedDepts,    setExpandedDepts]    = useState<Set<string>>(new Set())
+  const [collapsedTracks,  setCollapsedTracks]  = useState<Set<string>>(new Set())
+  const [classTab,         setClassTab]         = useState<string | null>(null)
+
+  // One class at a time — tabs switch between them
+  const classNames = useMemo(
+    () => [...new Set(entries.map(e => e.className))].sort(),
+    [entries],
+  )
+  const currentClass = classTab && classNames.includes(classTab) ? classTab : classNames[0]
+  const classEntries = useMemo(
+    () => entries.filter(e => e.className === currentClass),
+    [entries, currentClass],
+  )
 
   const counts = {
-    NOT_STARTED: entries.filter(e => e.status === 'NOT_STARTED').length,
-    IN_PROGRESS: entries.filter(e => e.status === 'IN_PROGRESS').length,
-    SUBMITTED:   entries.filter(e => e.status === 'SUBMITTED').length,
+    NOT_STARTED: classEntries.filter(e => e.status === 'NOT_STARTED').length,
+    IN_PROGRESS: classEntries.filter(e => e.status === 'IN_PROGRESS').length,
+    SUBMITTED:   classEntries.filter(e => e.status === 'SUBMITTED').length,
   }
 
   // Apply status + search filters at the sheet level
   const searching = search.trim().length > 0
-  const filtered = useMemo(() => entries.filter(e => {
+  const filtered = useMemo(() => classEntries.filter(e => {
     if (filter !== 'all' && e.status !== filter) return false
     if (searching) {
       const q = search.toLowerCase()
@@ -245,27 +261,27 @@ export function GradeQueue({ entries }: { entries: GradeQueueEntry[] }) {
           !e.templateTitle.toLowerCase().includes(q)) return false
     }
     return true
-  }), [entries, filter, search, searching])
+  }), [classEntries, filter, search, searching])
 
-  // Class → student grouping
-  const classSections = useMemo(() => {
-    const byClass = new Map<string, GradeQueueEntry[]>()
+  // Track → student grouping within the selected class
+  const trackSections = useMemo(() => {
+    const byTrack = new Map<Track, GradeQueueEntry[]>()
     for (const e of filtered) {
-      if (!byClass.has(e.className)) byClass.set(e.className, [])
-      byClass.get(e.className)!.push(e)
+      if (!byTrack.has(e.track)) byTrack.set(e.track, [])
+      byTrack.get(e.track)!.push(e)
     }
 
-    return [...byClass.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([className, classEntries]) => {
+    return [...byTrack.entries()]
+      .sort((a, b) => TRACK_ORDER.indexOf(a[0]) - TRACK_ORDER.indexOf(b[0]))
+      .map(([track, trackEntries]) => {
         const byStudent = new Map<string, GradeQueueEntry[]>()
-        for (const e of classEntries) {
+        for (const e of trackEntries) {
           if (!byStudent.has(e.studentId)) byStudent.set(e.studentId, [])
           byStudent.get(e.studentId)!.push(e)
         }
         const students = [...byStudent.values()]
           .sort((a, b) => a[0].studentSortKey.localeCompare(b[0].studentSortKey))
-        return { className, students }
+        return { track, students }
       })
   }, [filtered])
 
@@ -288,10 +304,37 @@ export function GradeQueue({ entries }: { entries: GradeQueueEntry[] }) {
     })
   }
 
+  function toggleTrack(key: string) {
+    setCollapsedTracks(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) { next.delete(key) } else { next.add(key) }
+      return next
+    })
+  }
+
   const qrEntry = qrEntryId ? entries.find(e => e.entryId === qrEntryId) : null
 
   return (
     <div className="space-y-4">
+      {/* Class selector tabs */}
+      {classNames.length > 1 && (
+        <div className="flex gap-1 border-b border-gray-200">
+          {classNames.map(name => (
+            <button
+              key={name}
+              onClick={() => setClassTab(name)}
+              className={`px-4 py-2 text-sm font-bold rounded-t-lg border-b-2 -mb-px transition-colors ${
+                name === currentClass
+                  ? 'border-tps-orange text-tps-orange'
+                  : 'border-transparent text-gray-500 hover:text-tps-navy hover:border-gray-300'
+              }`}
+            >
+              Class {name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Summary bar */}
       <div className="grid grid-cols-3 gap-3">
         <div className="card text-center py-3">
@@ -328,44 +371,52 @@ export function GradeQueue({ entries }: { entries: GradeQueueEntry[] }) {
                   : 'bg-white border border-gray-200 text-gray-600 hover:border-tps-orange hover:text-tps-orange'
               }`}
             >
-              {f === 'all' ? `All (${entries.length})` : `${STATUS_META[f].label} (${counts[f]})`}
+              {f === 'all' ? `All (${classEntries.length})` : `${STATUS_META[f].label} (${counts[f]})`}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Class → Student → Dept → Sheets */}
-      {classSections.length === 0 ? (
+      {/* Track → Student → Dept → Sheets */}
+      {trackSections.length === 0 ? (
         <div className="card text-center py-10 text-gray-400">No entries match your filters.</div>
       ) : (
-        classSections.map(section => (
-          <section key={section.className}>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs font-bold text-tps-navy uppercase tracking-wider px-2">
-                Class {section.className}
-              </span>
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs text-gray-400">{section.students.length} students</span>
-            </div>
+        trackSections.map(section => {
+          const isCollapsed = collapsedTracks.has(section.track) && !forceOpen
+          return (
+            <section key={section.track}>
+              <button
+                onClick={() => toggleTrack(section.track)}
+                className="w-full flex items-center gap-3 mb-2 group/track"
+              >
+                <span className={`text-gray-400 text-xs transition-transform ${isCollapsed ? '' : 'rotate-90'}`}>▶</span>
+                <span className="text-xs font-bold text-tps-navy uppercase tracking-wider">
+                  {TRACK_LABELS[section.track]}
+                </span>
+                <div className="h-px flex-1 bg-gray-200" />
+                <span className="text-xs text-gray-400">{section.students.length} student{section.students.length === 1 ? '' : 's'}</span>
+              </button>
 
-            <div className="space-y-2">
-              {section.students.map(studentEntries => (
-                <StudentSection
-                  key={studentEntries[0].studentId}
-                  entries={studentEntries}
-                  className={section.className}
-                  expanded={expandedStudents.has(studentEntries[0].studentId)}
-                  onToggle={() => toggleStudent(studentEntries[0].studentId)}
-                  expandedDepts={expandedDepts}
-                  onToggleDept={toggleDept}
-                  onQr={setQrEntryId}
-                  forceOpen={forceOpen}
-                />
-              ))}
-            </div>
-          </section>
-        ))
+              {!isCollapsed && (
+                <div className="space-y-2">
+                  {section.students.map(studentEntries => (
+                    <StudentSection
+                      key={studentEntries[0].studentId}
+                      entries={studentEntries}
+                      className={currentClass}
+                      expanded={expandedStudents.has(studentEntries[0].studentId)}
+                      onToggle={() => toggleStudent(studentEntries[0].studentId)}
+                      expandedDepts={expandedDepts}
+                      onToggleDept={toggleDept}
+                      onQr={setQrEntryId}
+                      forceOpen={forceOpen}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          )
+        })
       )}
 
       {/* QR modal */}

@@ -162,7 +162,7 @@ export default async function DashboardPage() {
     }
 
     return (
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">Welcome back, {firstName}</h1>
           <p className="text-gray-500 text-sm mt-0.5">
@@ -349,7 +349,7 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="w-full space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-tps-navy">Welcome back, {firstName}</h1>
         <p className="text-gray-500 text-sm mt-0.5">
@@ -405,38 +405,65 @@ export default async function DashboardPage() {
           </div>
           {weekEvents.length === 0 ? (
             <p className="text-sm text-gray-400 py-3">Nothing scheduled this week.</p>
-          ) : (
-            <div className="space-y-2">
-              {weekEvents.map(s => {
-                const isToday = s.scheduledDate && s.scheduledDate >= start && s.scheduledDate <= end
-                return (
-                  <Link
-                    key={s.id}
-                    href={`/portal/lessons/${encodeURIComponent(s.syllabusEvent.courseCode)}?classId=${s.classId}`}
-                    className="flex items-center gap-3 py-1.5 group"
-                  >
-                    <div className="text-center w-12 shrink-0">
-                      <p className={`text-[10px] uppercase ${isToday ? 'text-tps-orange font-bold' : 'text-gray-400'}`}>
-                        {isToday ? 'Today' : s.scheduledDate?.toLocaleDateString('en-US', { weekday: 'short' })}
-                      </p>
-                      <p className="text-xs font-mono font-bold text-tps-navy">{s.scheduledTime ?? '—'}</p>
+          ) : (() => {
+            // Group by day so each day reads as its own clearly divided block
+            const tomorrow = new Date(start.getTime() + 86400_000)
+            const byDay = new Map<string, typeof weekEvents>()
+            for (const s of weekEvents) {
+              const key = s.scheduledDate?.toISOString().slice(0, 10) ?? '—'
+              if (!byDay.has(key)) byDay.set(key, [])
+              byDay.get(key)!.push(s)
+            }
+            return (
+              <div className="space-y-3">
+                {[...byDay.entries()].map(([dayKey, dayEvents]) => {
+                  const d = dayEvents[0].scheduledDate
+                  const isToday    = !!d && d >= start && d <= end
+                  const isTomorrow = !isToday && !!d &&
+                    d.toISOString().slice(0, 10) === tomorrow.toISOString().slice(0, 10)
+                  return (
+                    <div key={dayKey} className={isToday ? 'rounded-lg bg-tps-orange/5 -mx-2 px-2 py-1' : ''}>
+                      {/* Bold day divider */}
+                      <div className={`flex items-center gap-2 border-b-2 pb-1 mb-1.5 ${
+                        isToday ? 'border-tps-orange' : 'border-gray-300'
+                      }`}>
+                        <span className={`text-xs font-black uppercase tracking-wide ${
+                          isToday ? 'text-tps-orange' : 'text-tps-navy'
+                        }`}>
+                          {isToday ? 'Today' : isTomorrow ? 'Tomorrow' : d?.toLocaleDateString('en-US', { weekday: 'long' })}
+                        </span>
+                        <span className="text-[10px] text-gray-400 font-semibold">
+                          {d?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {dayEvents.map(s => (
+                          <Link
+                            key={s.id}
+                            href={`/portal/lessons/${encodeURIComponent(s.syllabusEvent.courseCode)}?classId=${s.classId}`}
+                            className="flex items-center gap-3 py-1 group"
+                          >
+                            <p className="text-xs font-mono font-bold text-tps-navy w-12 shrink-0">{s.scheduledTime ?? '—'}</p>
+                            <span className="text-[10px] font-bold bg-tps-navy/10 text-tps-navy px-1.5 py-0.5 rounded shrink-0">
+                              {s.class.name}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-gray-800 group-hover:text-tps-orange transition-colors truncate">
+                                <span className="font-mono font-semibold">{s.syllabusEvent.courseCode}</span> · {s.syllabusEvent.title}
+                              </p>
+                              <p className="text-xs text-gray-400 truncate">
+                                {s.locationRoom ?? ''}{s.instructor && ` · ${s.instructor.firstName} ${s.instructor.lastName}`}
+                              </p>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
                     </div>
-                    <span className="text-[10px] font-bold bg-tps-navy/10 text-tps-navy px-1.5 py-0.5 rounded shrink-0">
-                      {s.class.name}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-800 group-hover:text-tps-orange transition-colors truncate">
-                        <span className="font-mono font-semibold">{s.syllabusEvent.courseCode}</span> · {s.syllabusEvent.title}
-                      </p>
-                      <p className="text-xs text-gray-400 truncate">
-                        {s.locationRoom ?? ''}{s.instructor && ` · ${s.instructor.firstName} ${s.instructor.lastName}`}
-                      </p>
-                    </div>
-                  </Link>
-                )
-              })}
-            </div>
-          )}
+                  )
+                })}
+              </div>
+            )
+          })()}
         </section>
 
         {/* Classes snapshot */}

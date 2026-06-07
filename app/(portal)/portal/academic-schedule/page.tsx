@@ -19,7 +19,7 @@ export default async function AcademicSchedulePage({
 
   if (!data.selectedClassId) {
     return (
-      <div className="max-w-[1800px] mx-auto">
+      <div className="w-full">
         <h1 className="text-2xl font-bold text-tps-navy mb-2">Academic Schedule</h1>
         <div className="card text-center py-16 text-gray-400 text-sm">
           No active classes found. Create a class first.
@@ -29,7 +29,7 @@ export default async function AcademicSchedulePage({
   }
 
   return (
-    <div className="max-w-[1800px] mx-auto">
+    <div className="w-full">
       <ScheduleView
         classes={data.classes}
         activeClasses={data.activeClasses}
@@ -39,6 +39,7 @@ export default async function AcademicSchedulePage({
         classEndDate={data.classEndDate}
         weeks={data.weeks}
         scheduled={data.scheduled}
+        customItems={data.customItems}
         unscheduledByClass={data.unscheduledByClass}
         instructors={data.instructors}
         canEdit={data.canEdit}

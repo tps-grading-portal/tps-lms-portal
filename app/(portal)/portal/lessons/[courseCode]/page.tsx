@@ -104,7 +104,7 @@ export default async function LessonPage({
   }))
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <div className="w-full space-y-6 pb-12">
 
       {/* Breadcrumb */}
       <div className="text-sm text-gray-400 flex items-center gap-1.5 flex-wrap">

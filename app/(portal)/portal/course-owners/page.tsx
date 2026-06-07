@@ -36,7 +36,7 @@ export default async function CourseOwnersPage() {
 
   const staffOptions = staff.map(s => ({ id: s.id, name: `${s.lastName}, ${s.firstName}`.trim() }))
 
-  type Owner = { id: string; name: string; via: string }
+  type Owner = { id: string; name: string; via: string; assignmentId?: string }
 
   // Phase-level coverage: dept → owners
   const phaseOwners = new Map<string, Owner[]>()
@@ -64,7 +64,7 @@ export default async function CourseOwnersPage() {
     }
   }
 
-  // Course-level owners: eventId → owners
+  // Course-level owners: eventId → owners (assignmentId makes them removable)
   const courseOwners = new Map<string, Owner[]>()
   for (const a of assignments) {
     if (a.syllabusEventId && a.user.isActive) {
@@ -73,6 +73,7 @@ export default async function CourseOwnersPage() {
         id: a.user.id,
         name: `${a.user.firstName} ${a.user.lastName}`.trim(),
         via: 'course owner',
+        assignmentId: a.id,
       })
     }
   }
@@ -97,7 +98,7 @@ export default async function CourseOwnersPage() {
   const sortedDepts = [...byDept.entries()].sort((a, b) => deptSortIndex(a[0]) - deptSortIndex(b[0]))
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="w-full space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">Course Owners</h1>
@@ -123,11 +124,17 @@ export default async function CourseOwnersPage() {
         </div>
       )}
 
-      {/* Coverage by MCG course — collapsible to phase level */}
+      {/* Coverage by MCG course — phases collapsed by default; the colored
+          indicator on the right shows at a glance whether owners are missing */}
       {sortedDepts.map(([dept, deptRows]) => {
         const deptUnowned = deptRows.filter(r => r.owners.length === 0).length
+        // Missing owners first so they're easy to get to
+        const orderedRows = [...deptRows].sort((a, b) =>
+          (a.owners.length === 0 ? 0 : 1) - (b.owners.length === 0 ? 0 : 1) ||
+          a.courseCode.localeCompare(b.courseCode, undefined, { numeric: true }),
+        )
         return (
-          <details key={dept} open={deptUnowned > 0} className="group">
+          <details key={dept} className="group">
             <summary className="cursor-pointer list-none flex items-center gap-3 py-2 select-none">
               <span className="text-gray-400 text-sm transition-transform group-open:rotate-90">▶</span>
               <span className="text-xs font-bold text-tps-navy uppercase tracking-wider">
@@ -138,12 +145,16 @@ export default async function CourseOwnersPage() {
               <span className={`text-xs ${deptUnowned > 0 ? 'text-amber-600 font-semibold' : 'text-green-600'}`}>
                 {deptUnowned > 0 ? `${deptUnowned} unowned` : 'covered ✓'}
               </span>
+              <span
+                className={`w-3 h-3 rounded-full shrink-0 ${deptUnowned > 0 ? 'bg-amber-400' : 'bg-green-500'}`}
+                title={deptUnowned > 0 ? `${deptUnowned} courses missing an owner` : 'All courses covered'}
+              />
             </summary>
 
             <div className="card overflow-hidden p-0 mt-1">
               <table className="w-full text-sm">
                 <tbody className="divide-y divide-gray-50">
-                  {deptRows.map(r => (
+                  {orderedRows.map(r => (
                     <tr key={r.id} className={r.owners.length === 0 ? 'bg-amber-50/60' : 'hover:bg-gray-50/50'}>
                       <td className="px-4 py-2 font-mono text-xs text-tps-navy font-bold w-28">
                         <Link href={`/portal/lessons/${encodeURIComponent(r.courseCode)}`} className="hover:text-tps-orange">

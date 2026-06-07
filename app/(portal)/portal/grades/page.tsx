@@ -33,7 +33,7 @@ export default async function GradesPage() {
 
   if (!student) {
     return (
-      <div className="max-w-3xl mx-auto">
+      <div className="w-full">
         <h1 className="text-2xl font-bold text-tps-navy mb-1">My Grades</h1>
         <div className="card text-center py-16 text-gray-400">
           No student profile linked to your account. Contact your instructor or system admin.
@@ -51,7 +51,7 @@ export default async function GradesPage() {
     : null
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="w-full space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-tps-navy">My Grades</h1>
         <p className="text-gray-500 text-sm">

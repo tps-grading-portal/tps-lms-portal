@@ -22,7 +22,7 @@ export default async function GradebookExportsPage() {
   })
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="w-full">
       <div className="mb-4">
         <h1 className="text-2xl font-bold text-tps-navy">Grades</h1>
         <p className="text-gray-500 text-sm">Download full gradebooks as Excel</p>

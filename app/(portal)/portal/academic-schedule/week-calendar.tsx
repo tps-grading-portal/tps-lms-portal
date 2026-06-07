@@ -2,7 +2,10 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { moveScheduledEventAction, type ScheduleConflict, type ScheduledEventRow } from './actions'
+import {
+  moveScheduledEventAction, moveCustomItemAction,
+  type ScheduleConflict, type ScheduledEventRow, type CustomItemRow,
+} from './actions'
 
 // Grid geometry — 0700 to 1800 in 30-minute rows
 const DAY_START_MIN = 7 * 60
@@ -40,8 +43,10 @@ function dayISO(weekStartISO: string, dayIdx: number): string {
 }
 
 type DragState =
-  | { kind: 'move';   scheduleId: string; durationMin: number; dayIdx: number; startMin: number }
-  | { kind: 'resize'; scheduleId: string; dayIdx: number; startMin: number; durationMin: number }
+  | { kind: 'move';          scheduleId: string; durationMin: number; dayIdx: number; startMin: number }
+  | { kind: 'resize';        scheduleId: string; dayIdx: number; startMin: number; durationMin: number }
+  | { kind: 'custom-move';   scheduleId: string; durationMin: number; dayIdx: number; startMin: number }
+  | { kind: 'custom-resize'; scheduleId: string; dayIdx: number; startMin: number; durationMin: number }
 
 type ConflictPrompt = {
   conflicts: ScheduleConflict[]
@@ -49,15 +54,17 @@ type ConflictPrompt = {
 }
 
 export function WeekCalendar({
-  weekStartISO, events, laneCount, days, canEdit, onSlotClick, onEventClick, onExternalDrop,
+  weekStartISO, events, customItems, laneCount, days, canEdit, onSlotClick, onEventClick, onCustomItemClick, onExternalDrop,
 }: {
   weekStartISO:   string               // Monday of the visible week (YYYY-MM-DD)
   events:         ScheduledEventRow[]  // merged events of all visible classes, any class
+  customItems:    CustomItemRow[]      // free-text items (briefings, socials, holidays …)
   laneCount:      number               // visible classes — day columns split into lanes
   days:           5 | 7                // weekend toggle
   canEdit:        boolean
   onSlotClick:    (dateISO: string, time: string) => void
   onEventClick:   (e: ScheduledEventRow) => void
+  onCustomItemClick: (c: CustomItemRow) => void
   onExternalDrop: (syllabusEventId: string, dateISO: string, time: string) => void
 }) {
   const router = useRouter()
@@ -81,6 +88,17 @@ export function WeekCalendar({
     const iso = dayISO(weekStart, dayIdx)
     return placed.filter(e => e.scheduledDate!.slice(0, 10) === iso)
   }
+
+  const placedCustom = customItems.filter(c => {
+    const iso = c.scheduledDate.slice(0, 10)
+    return iso >= weekStart && iso <= dayISO(weekStart, days - 1)
+  })
+  const customForDay = (dayIdx: number) => {
+    const iso = dayISO(weekStart, dayIdx)
+    return placedCustom.filter(c => c.scheduledDate.slice(0, 10) === iso)
+  }
+
+  const todayISO = new Date().toLocaleDateString('en-CA')  // YYYY-MM-DD local
 
   // ── Pointer math ─────────────────────────────────────────────────────────────
 
@@ -115,11 +133,22 @@ export function WeekCalendar({
     router.refresh()
   }
 
+  async function commitCustomMove(id: string, dayIdx: number, startMin: number, durationMin: number) {
+    setSaving(true)
+    await moveCustomItemAction(id, {
+      scheduledDate:   dayISO(weekStart, dayIdx),
+      scheduledTime:   toHHMM(startMin),
+      durationMinutes: durationMin,
+    })
+    setSaving(false)
+    router.refresh()
+  }
+
   function handlePointerMove(e: React.PointerEvent) {
     if (!drag) return
     const pos = posFromPointer(e.clientX, e.clientY)
     if (!pos) return
-    if (drag.kind === 'move') {
+    if (drag.kind === 'move' || drag.kind === 'custom-move') {
       setDrag({ ...drag, dayIdx: pos.dayIdx, startMin: pos.startMin })
     } else {
       const newDur = Math.max(SLOT_MIN, pos.startMin + SLOT_MIN - drag.startMin)
@@ -131,7 +160,11 @@ export function WeekCalendar({
     if (!drag) return
     const d = drag
     setDrag(null)
-    commitMove(d.scheduleId, d.dayIdx, d.startMin, d.durationMin)
+    if (d.kind === 'custom-move' || d.kind === 'custom-resize') {
+      commitCustomMove(d.scheduleId, d.dayIdx, d.startMin, d.durationMin)
+    } else {
+      commitMove(d.scheduleId, d.dayIdx, d.startMin, d.durationMin)
+    }
   }
 
   // ── HTML5 drop target (events dragged in from the side panel) ───────────────
@@ -165,15 +198,23 @@ export function WeekCalendar({
     <div className="card p-0 overflow-x-auto select-none">
       <div style={{ minWidth: days === 7 ? 1050 : 800 }}>
         {/* Day headers */}
-        <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: `56px repeat(${days}, 1fr)` }}>
+        <div className="grid border-b-2 border-gray-300" style={{ gridTemplateColumns: `56px repeat(${days}, 1fr)` }}>
           <div />
           {DAY_LABELS.map((label, i) => {
             const iso = dayISO(weekStart, i)
             const isWeekend = i >= 5
+            const isToday   = iso === todayISO
             return (
-              <div key={label} className={`px-2 py-2 text-center border-l border-gray-100 ${isWeekend ? 'bg-gray-50' : ''}`}>
-                <p className="text-xs font-bold text-tps-navy">{label}</p>
-                <p className="text-[10px] text-gray-400">
+              <div
+                key={label}
+                className={`px-2 py-2 text-center border-l-2 border-gray-300 ${
+                  isToday ? 'bg-tps-orange/10' : isWeekend ? 'bg-gray-50' : ''
+                }`}
+              >
+                <p className={`text-xs font-bold ${isToday ? 'text-tps-orange' : 'text-tps-navy'}`}>
+                  {label}{isToday && ' · Today'}
+                </p>
+                <p className={`text-[10px] ${isToday ? 'text-tps-orange/70 font-semibold' : 'text-gray-400'}`}>
                   {new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 </p>
               </div>
@@ -208,9 +249,14 @@ export function WeekCalendar({
             onDragLeave={() => setDropHint(null)}
             onDrop={handleDrop}
           >
-            {/* Background slots */}
+            {/* Background slots — bold borders divide the days; today is tinted */}
             {Array.from({ length: days }).map((_, dayIdx) => (
-              <div key={dayIdx} className={`relative border-l border-gray-100 ${dayIdx >= 5 ? 'bg-gray-50/60' : ''}`}>
+              <div
+                key={dayIdx}
+                className={`relative border-l-2 border-gray-300 ${
+                  dayISO(weekStart, dayIdx) === todayISO ? 'bg-tps-orange/[0.06]' : dayIdx >= 5 ? 'bg-gray-50/60' : ''
+                }`}
+              >
                 {Array.from({ length: ROWS }).map((_, row) => (
                   <div
                     key={row}
@@ -310,11 +356,90 @@ export function WeekCalendar({
                     </div>
                   )
                 })}
+
+                {/* Custom free-text items for this day */}
+                {customForDay(dayIdx).map(c => {
+                  const isDragging = drag?.scheduleId === c.id
+                  const startMin = isDragging && drag.kind === 'custom-move' ? drag.startMin : toMinutes(c.scheduledTime)
+                  const durMin   = isDragging ? drag.durationMin : c.durationMinutes
+                  const showDay  = isDragging && drag.kind === 'custom-move' ? drag.dayIdx : dayIdx
+                  if (showDay !== dayIdx && isDragging) return null
+
+                  const top    = ((startMin - DAY_START_MIN) / SLOT_MIN) * SLOT_PX
+                  const height = Math.max(SLOT_PX, (durMin / SLOT_MIN) * SLOT_PX)
+
+                  // School-wide items span the full day column; class items keep their lane
+                  const lanes = Math.max(1, laneCount)
+                  const lane: React.CSSProperties =
+                    c.classColorIdx === null || lanes <= 1
+                      ? { left: 2, right: 2 }
+                      : {
+                          left:  `calc(${((c.classColorIdx % lanes) / lanes) * 100}% + 2px)`,
+                          width: `calc(${100 / lanes}% - 4px)`,
+                        }
+
+                  return (
+                    <div
+                      key={c.id}
+                      className={`absolute rounded-md border-l-4 border border-dashed px-1.5 py-1 overflow-hidden text-left bg-slate-200/90 border-slate-500 text-slate-800 ${
+                        isDragging ? 'shadow-lg opacity-90 z-20' : 'z-10 hover:shadow-md'
+                      } ${canEdit ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
+                      style={{ top, height, ...lane }}
+                      onPointerDown={ev => {
+                        if (!canEdit) return
+                        ev.preventDefault()
+                        ;(ev.target as HTMLElement).setPointerCapture?.(ev.pointerId)
+                        setDrag({
+                          kind: 'custom-move',
+                          scheduleId: c.id,
+                          durationMin: c.durationMinutes,
+                          dayIdx,
+                          startMin: toMinutes(c.scheduledTime),
+                        })
+                      }}
+                      onClick={ev => {
+                        ev.stopPropagation()
+                        if (!drag) onCustomItemClick(c)
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span className="text-[8px]">📌</span>
+                        {c.className && laneCount > 1 && (
+                          <span className="text-[8px] font-bold px-1 rounded bg-slate-600 text-white">{c.className}</span>
+                        )}
+                        <p className="text-[10px] font-bold leading-tight truncate">{c.title}</p>
+                      </div>
+                      {height >= SLOT_PX * 1.5 && c.locationRoom && (
+                        <p className="text-[9px] leading-tight truncate opacity-70">{c.locationRoom}</p>
+                      )}
+
+                      {canEdit && (
+                        <div
+                          className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize"
+                          onPointerDown={ev => {
+                            ev.preventDefault()
+                            ev.stopPropagation()
+                            ;(ev.target as HTMLElement).setPointerCapture?.(ev.pointerId)
+                            setDrag({
+                              kind: 'custom-resize',
+                              scheduleId: c.id,
+                              dayIdx,
+                              startMin: toMinutes(c.scheduledTime),
+                              durationMin: c.durationMinutes,
+                            })
+                          }}
+                        >
+                          <div className="mx-auto mt-0.5 w-6 h-0.5 rounded bg-current opacity-30" />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             ))}
 
             {/* Internal drag ghost */}
-            {drag?.kind === 'move' && (
+            {(drag?.kind === 'move' || drag?.kind === 'custom-move') && (
               <div
                 className="absolute rounded-md border-2 border-dashed border-tps-orange bg-tps-orange/10 z-30 pointer-events-none"
                 style={{

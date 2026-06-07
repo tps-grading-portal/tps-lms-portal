@@ -15,7 +15,7 @@ export default async function SyllabusPage({
   const data = await getRoadmapData(classId)
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="w-full">
       <h1 className="text-2xl font-bold text-tps-navy mb-1">Syllabus Roadmap</h1>
       <p className="text-gray-500 text-sm mb-6">
         {data.viewClassName ? `Class ${data.viewClassName} MCG` : 'MCG course catalog'}

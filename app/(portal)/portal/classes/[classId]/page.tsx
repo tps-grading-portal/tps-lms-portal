@@ -57,7 +57,7 @@ export default async function ClassDetailPage({ params }: { params: Promise<{ cl
   })
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="w-full">
       <ClassDetailView
         cls={{
           id:            cls.id,

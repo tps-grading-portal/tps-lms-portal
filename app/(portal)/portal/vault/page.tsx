@@ -48,7 +48,7 @@ export default async function VaultPage({
   ])
 
   return (
-    <div className="max-w-6xl mx-auto space-y-5">
+    <div className="w-full space-y-5">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">Content Vault</h1>

@@ -13,7 +13,7 @@ export default async function GradePage() {
 
   if (classNames.length === 0) {
     return (
-      <div className="max-w-4xl mx-auto">
+      <div className="w-full">
         <h1 className="text-2xl font-bold text-tps-navy mb-1">Grading Queue</h1>
         <p className="text-gray-500 text-sm mb-6">Mobile-optimized gradebook entry with instant standings recalculation</p>
         <div className="card text-center py-16 text-gray-400">
@@ -24,7 +24,7 @@ export default async function GradePage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="w-full">
       <div className="mb-4">
         <h1 className="text-2xl font-bold text-tps-navy">Grades</h1>
         <p className="text-gray-500 text-sm">

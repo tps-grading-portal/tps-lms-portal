@@ -11,7 +11,7 @@ export default async function ChatPage() {
   const activeClass = await getActiveClassAction()
   if (!activeClass) {
     return (
-      <div className="max-w-5xl mx-auto">
+      <div className="w-full">
         <h1 className="text-2xl font-bold text-tps-navy mb-1">Digital Squadron</h1>
         <p className="text-gray-500 text-sm mb-6">
           Native messaging — auto-provisioned channels by track and class
@@ -29,7 +29,7 @@ export default async function ChatPage() {
   const channels = await getChannelsAction(activeClass.id)
 
   return (
-    <div className="max-w-[1700px] mx-auto">
+    <div className="w-full">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">Digital Squadron</h1>

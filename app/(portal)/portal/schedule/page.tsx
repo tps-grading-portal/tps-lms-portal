@@ -39,7 +39,7 @@ export default async function SchedulePage() {
   const students = [...studentMap.values()].sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="w-full space-y-5">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">Flight Schedule</h1>

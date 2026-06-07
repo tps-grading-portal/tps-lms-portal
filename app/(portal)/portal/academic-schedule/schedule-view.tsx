@@ -9,8 +9,9 @@ import {
   createWeekAction, updateWeekAction, deleteWeekAction,
   scheduleEventAction, unscheduleAllSessionsAction, toggleConfirmAction,
   saveEventSessionsAction, setDefaultDurationAction, generateWeeksAction,
+  saveCustomItemAction, deleteCustomItemAction,
   type WeekRow, type ScheduledEventRow, type CatalogEvent, type InstructorOption,
-  type ScheduleConflict,
+  type ScheduleConflict, type CustomItemRow,
 } from './actions'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -242,6 +243,128 @@ function SessionsModal({
           {existingSessions.length > 0 && (
             <button onClick={handleRemoveAll} disabled={pending} className="text-sm text-red-500 hover:text-red-700 px-3">
               Remove
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Custom calendar item modal (free text) ────────────────────────────────────
+
+function CustomItemModal({
+  item, prefill, activeClasses, onClose,
+}: {
+  item:          CustomItemRow | null   // present = edit
+  prefill:       { date: string; time: string } | null
+  activeClasses: { id: string; name: string }[]
+  onClose:       () => void
+}) {
+  const router = useRouter()
+  const [pending, startTx]  = useTransition()
+  const [error,   setError] = useState<string | null>(null)
+
+  const [title,    setTitle]    = useState(item?.title ?? '')
+  const [classId,  setClassId]  = useState<string>(item?.classId ?? '')
+  const [date,     setDate]     = useState(item ? item.scheduledDate.slice(0, 10) : prefill?.date ?? '')
+  const [time,     setTime]     = useState(item?.scheduledTime ?? prefill?.time ?? '08:00')
+  const [duration, setDuration] = useState((item?.durationMinutes ?? 60).toString())
+  const [room,     setRoom]     = useState(item?.locationRoom ?? '')
+  const [notes,    setNotes]    = useState(item?.notes ?? '')
+
+  function handleSave() {
+    setError(null)
+    startTx(async () => {
+      const result = await saveCustomItemAction({
+        id:              item?.id,
+        classId:         classId || null,
+        title,
+        notes:           notes || null,
+        scheduledDate:   date,
+        scheduledTime:   time,
+        durationMinutes: parseInt(duration) || 60,
+        locationRoom:    room || null,
+      })
+      if ('error' in result && result.error) { setError(result.error); return }
+      router.refresh()
+      onClose()
+    })
+  }
+
+  function handleDelete() {
+    if (!item) return
+    if (!confirm(`Remove "${item.title}" from the calendar?`)) return
+    startTx(async () => {
+      await deleteCustomItemAction(item.id)
+      router.refresh()
+      onClose()
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-tps-navy">📌 {item ? 'Edit Calendar Item' : 'Add Calendar Item'}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+
+        <div>
+          <label className="field-label">Title *</label>
+          <input
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            className="field-input"
+            placeholder="e.g. Commander's Call, Safety Briefing, PT…"
+            disabled={pending}
+            autoFocus
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="field-label">Applies To</label>
+            <select value={classId} onChange={e => setClassId(e.target.value)} className="field-input" disabled={pending}>
+              <option value="">Whole school</option>
+              {activeClasses.map(c => <option key={c.id} value={c.id}>Class {c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="field-label">Room / Location</label>
+            <input value={room} onChange={e => setRoom(e.target.value)} className="field-input" disabled={pending} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="field-label">Date *</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="field-input" disabled={pending} />
+          </div>
+          <div>
+            <label className="field-label">Time *</label>
+            <input type="time" value={time} onChange={e => setTime(e.target.value)} className="field-input" disabled={pending} />
+          </div>
+          <div>
+            <label className="field-label">Minutes</label>
+            <input type="number" min={30} step={30} value={duration} onChange={e => setDuration(e.target.value)} className="field-input" disabled={pending} />
+          </div>
+        </div>
+
+        <div>
+          <label className="field-label">Notes</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} className="field-input" rows={2} disabled={pending} />
+        </div>
+
+        {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+        <div className="flex gap-3">
+          <button onClick={handleSave} disabled={pending || !title.trim() || !date || !time} className="btn-primary flex-1 text-sm py-2.5">
+            {pending ? 'Saving…' : 'Save Item'}
+          </button>
+          {item && (
+            <button onClick={handleDelete} disabled={pending} className="text-sm text-red-500 hover:text-red-700 px-3">
+              Delete
             </button>
           )}
         </div>
@@ -594,6 +717,7 @@ type Props = {
   classEndDate:      string | null
   weeks:             WeekRow[]
   scheduled:         ScheduledEventRow[]   // all sessions, all visible classes
+  customItems:       CustomItemRow[]
   unscheduledByClass: Record<string, CatalogEvent[]>
   instructors:       InstructorOption[]
   canEdit:           boolean
@@ -629,7 +753,7 @@ type SessionsModalState = {
 
 export function ScheduleView({
   classes, activeClasses, selectedClassId, selectedClassName, classStartDate, classEndDate,
-  weeks, scheduled, unscheduledByClass, instructors, canEdit,
+  weeks, scheduled, customItems, unscheduledByClass, instructors, canEdit,
 }: Props) {
   const router = useRouter()
   const [weekForm,      setWeekForm]      = useState<WeekFormState | null>(null)
@@ -640,6 +764,7 @@ export function ScheduleView({
   const [panelClassId,  setPanelClassId]  = useState(selectedClassId)
   const [selectedEvent, setSelectedEvent] = useState<CatalogEvent | null>(null)
   const [sessionsModal, setSessionsModal] = useState<SessionsModalState | null>(null)
+  const [customModal,   setCustomModal]   = useState<{ item: CustomItemRow | null; prefill: { date: string; time: string } | null } | null>(null)
   const [dropConflicts, setDropConflicts] = useState<{ conflicts: ScheduleConflict[]; retry: () => void } | null>(null)
   const [, startTx] = useTransition()
 
@@ -809,6 +934,15 @@ export function ScheduleView({
               >
                 Today
               </button>
+              {canEdit && (
+                <button
+                  onClick={() => setCustomModal({ item: null, prefill: { date: viewMonday, time: '08:00' } })}
+                  className="btn-secondary text-xs px-3 py-1.5"
+                  title="Add a free-text item (briefing, social, holiday…)"
+                >
+                  📌 + Custom Item
+                </button>
+              )}
               {selectedEvent && (
                 <span className="text-xs bg-tps-orange/10 text-tps-orange font-semibold px-2.5 py-1.5 rounded-lg">
                   Placing {selectedEvent.courseCode} — click a slot
@@ -842,11 +976,13 @@ export function ScheduleView({
             <WeekCalendar
               weekStartISO={viewMonday}
               events={scheduled}
+              customItems={customItems}
               laneCount={activeClasses.length}
               days={showWeekend ? 7 : 5}
               canEdit={canEdit}
               onSlotClick={handleSlotClick}
               onEventClick={openSessionsForScheduled}
+              onCustomItemClick={c => { if (canEdit) setCustomModal({ item: c, prefill: null }) }}
               onExternalDrop={(eventId, dateISO, time) => scheduleAt(eventId, dateISO, time)}
             />
           </div>
@@ -962,6 +1098,14 @@ export function ScheduleView({
       )}
       {weekForm && (
         <WeekFormModal state={weekForm} classId={selectedClassId} onClose={() => setWeekForm(null)} />
+      )}
+      {customModal && (
+        <CustomItemModal
+          item={customModal.item}
+          prefill={customModal.prefill}
+          activeClasses={activeClasses}
+          onClose={() => setCustomModal(null)}
+        />
       )}
     </div>
   )

@@ -33,7 +33,7 @@ export default async function StandingsPage({
   const selectedClassId = params.classId ?? classes[0]?.id
   if (!selectedClassId) {
     return (
-      <div className="max-w-5xl mx-auto">
+      <div className="w-full">
         <h1 className="text-2xl font-bold text-tps-navy mb-2">Class Standings</h1>
         <div className="card text-center py-16 text-gray-400 text-sm">
           No active classes found. Create a class first.
@@ -45,7 +45,7 @@ export default async function StandingsPage({
   const standings = await computeStandings(selectedClassId)
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="w-full space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">Class Standings</h1>

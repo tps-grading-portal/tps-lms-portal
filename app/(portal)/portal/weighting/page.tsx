@@ -15,7 +15,7 @@ export default async function WeightingPage() {
   const { events, catalog, weightMap } = await getWeightingMatrixData()
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="w-full">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-tps-navy">Dean&apos;s Weighting Matrix</h1>
         <p className="text-gray-500 text-sm mt-1">

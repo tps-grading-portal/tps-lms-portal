@@ -57,6 +57,21 @@ export type CatalogEvent = {
 
 export type InstructorOption = { id: string; name: string }
 
+// Free-text calendar item (briefing, social, holiday, …)
+export type CustomItemRow = {
+  id:              string
+  classId:         string | null
+  className:       string | null
+  classColorIdx:   number | null   // null = school-wide (spans all lanes)
+  title:           string
+  notes:           string | null
+  scheduledDate:   string          // ISO
+  scheduledTime:   string
+  durationMinutes: number
+  locationRoom:    string | null
+  createdByName:   string
+}
+
 // ── Load full schedule for a class ───────────────────────────────────────────
 
 export async function getScheduleDataAction(classId?: string) {
@@ -81,7 +96,7 @@ export async function getScheduleDataAction(classId?: string) {
       classes: classes.map(c => ({ id: c.id, name: c.name, isActive: c.isActive })),
       activeClasses: [],
       selectedClassId: null, classStartDate: null, classEndDate: null,
-      weeks: [], scheduled: [], unscheduledByClass: {}, instructors: [], canEdit, studentTrack: null,
+      weeks: [], scheduled: [], customItems: [], unscheduledByClass: {}, instructors: [], canEdit, studentTrack: null,
     }
   }
 
@@ -97,7 +112,7 @@ export async function getScheduleDataAction(classId?: string) {
     studentTrack = student?.track ?? null
   }
 
-  const [weeks, schedules, catalog, instructors] = await Promise.all([
+  const [weeks, schedules, catalog, instructors, customItems] = await Promise.all([
     db.academicWeek.findMany({
       where:   { classId: selectedClass.id },
       orderBy: { weekNumber: 'asc' },
@@ -127,6 +142,11 @@ export async function getScheduleDataAction(classId?: string) {
       where:   { isActive: true, role: { in: ['LINE_INSTRUCTOR', 'GUEST_INSTRUCTOR', 'DEPT_CHAIR', 'ADO', 'DO', 'SYSTEM_ADMIN'] } },
       orderBy: { lastName: 'asc' },
       select:  { id: true, firstName: true, lastName: true },
+    }),
+    db.customScheduleItem.findMany({
+      where:   { OR: [{ classId: { in: calendarClassIds } }, { classId: null }] },
+      include: { createdBy: { select: { firstName: true, lastName: true } } },
+      orderBy: [{ scheduledDate: 'asc' }, { scheduledTime: 'asc' }],
     }),
   ])
 
@@ -218,6 +238,19 @@ export async function getScheduleDataAction(classId?: string) {
     classEndDate:   selectedClass.endDate?.toISOString().slice(0, 10) ?? null,
     weeks: weekRows,
     scheduled,
+    customItems: customItems.map((c): CustomItemRow => ({
+      id:              c.id,
+      classId:         c.classId,
+      className:       c.classId ? classNameById.get(c.classId) ?? null : null,
+      classColorIdx:   c.classId ? colorIdxByClass.get(c.classId) ?? 0 : null,
+      title:           c.title,
+      notes:           c.notes,
+      scheduledDate:   c.scheduledDate.toISOString(),
+      scheduledTime:   c.scheduledTime,
+      durationMinutes: c.durationMinutes,
+      locationRoom:    c.locationRoom,
+      createdByName:   `${c.createdBy.firstName} ${c.createdBy.lastName}`.trim(),
+    })),
     unscheduledByClass,
     instructors: instructors.map(i => ({ id: i.id, name: `${i.firstName} ${i.lastName}`.trim() })),
     canEdit,
@@ -592,6 +625,74 @@ export async function unscheduleEventAction(scheduleId: string) {
 
   await db.classSyllabusSchedule.delete({ where: { id: scheduleId } })
 
+  revalidatePath('/portal/academic-schedule')
+  return { ok: true }
+}
+
+// ── Custom free-text calendar items ───────────────────────────────────────────
+
+export async function saveCustomItemAction(data: {
+  id?:             string         // present = edit
+  classId:         string | null  // null = school-wide
+  title:           string
+  notes:           string | null
+  scheduledDate:   string         // YYYY-MM-DD
+  scheduledTime:   string         // HH:MM
+  durationMinutes: number
+  locationRoom:    string | null
+}) {
+  const user = await requireAuth()
+  if (!can(user.role, 'schedule:academic')) return { error: 'Insufficient permissions' }
+
+  const title = data.title.trim()
+  if (!title) return { error: 'A title is required.' }
+  if (!data.scheduledDate || !data.scheduledTime) return { error: 'Date and time are required.' }
+
+  const payload = {
+    classId:         data.classId,
+    title,
+    notes:           data.notes?.trim() || null,
+    scheduledDate:   new Date(`${data.scheduledDate}T00:00:00Z`),
+    scheduledTime:   data.scheduledTime,
+    durationMinutes: data.durationMinutes || 60,
+    locationRoom:    data.locationRoom?.trim() || null,
+  }
+
+  if (data.id) {
+    await db.customScheduleItem.update({ where: { id: data.id }, data: payload })
+  } else {
+    await db.customScheduleItem.create({ data: { ...payload, createdById: user.id } })
+  }
+
+  revalidatePath('/portal/academic-schedule')
+  return { ok: true }
+}
+
+export async function moveCustomItemAction(id: string, data: {
+  scheduledDate:   string
+  scheduledTime:   string
+  durationMinutes: number
+}) {
+  const user = await requireAuth()
+  if (!can(user.role, 'schedule:academic')) return { error: 'Insufficient permissions' }
+
+  await db.customScheduleItem.update({
+    where: { id },
+    data: {
+      scheduledDate:   new Date(`${data.scheduledDate}T00:00:00Z`),
+      scheduledTime:   data.scheduledTime,
+      durationMinutes: data.durationMinutes,
+    },
+  })
+  revalidatePath('/portal/academic-schedule')
+  return { ok: true }
+}
+
+export async function deleteCustomItemAction(id: string) {
+  const user = await requireAuth()
+  if (!can(user.role, 'schedule:academic')) return { error: 'Insufficient permissions' }
+
+  await db.customScheduleItem.delete({ where: { id } })
   revalidatePath('/portal/academic-schedule')
   return { ok: true }
 }

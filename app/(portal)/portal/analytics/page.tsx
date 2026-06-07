@@ -3,6 +3,8 @@ import { can } from '@/lib/permissions'
 import { redirect } from 'next/navigation'
 import { db } from '@/lib/db'
 import { computeClassAnalytics } from '@/lib/analytics'
+import { computeClassComparison } from '@/lib/class-comparison'
+import { ClassComparison } from './class-comparison'
 import { GradesTabs } from '@/components/portal/grades-tabs'
 import type { Metadata } from 'next'
 import type { AlertSeverity } from '@prisma/client'
@@ -43,7 +45,7 @@ export default async function AnalyticsPage({
 
   if (!selectedClassId) {
     return (
-      <div className="max-w-5xl mx-auto">
+      <div className="w-full">
         <h1 className="text-2xl font-bold text-tps-navy mb-2">Analytics</h1>
         <div className="card text-center py-16 text-gray-400 text-sm">
           No active classes found.
@@ -52,13 +54,16 @@ export default async function AnalyticsPage({
     )
   }
 
-  const analytics = await computeClassAnalytics(selectedClassId)
+  const [analytics, comparison] = await Promise.all([
+    computeClassAnalytics(selectedClassId),
+    computeClassComparison(),
+  ])
   const criticalCount = analytics.studentAlerts.filter(a => a.severity === 'CRITICAL').length
 
   const showGraderAlerts = can(role, 'view:all_analytics') || can(role, 'view:dept_analytics')
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="w-full space-y-6">
       <GradesTabs role={role} />
 
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -111,6 +116,17 @@ export default async function AnalyticsPage({
           <p className="text-xs text-gray-500 mt-0.5">Class Avg Score</p>
         </div>
       </div>
+
+      {/* Cross-class comparison — every class ever in the LMS, with trends */}
+      <section>
+        <h2 className="font-bold text-tps-navy text-base mb-1">Class Comparison &amp; Trends</h2>
+        <p className="text-xs text-gray-400 mb-3">
+          Compare performance across all classes — active and archived — overall,
+          by curriculum phase, or event by event. The orange line traces the trend
+          from oldest to newest class.
+        </p>
+        <ClassComparison data={comparison} />
+      </section>
 
       {/* Student alerts */}
       <section>

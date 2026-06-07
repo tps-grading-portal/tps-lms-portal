@@ -218,4 +218,5 @@ export const PORTAL_NAV: NavItem[] = [
   { label: 'Course Owners',      href: '/portal/course-owners',      requiredPermission: 'manage:users',              icon: 'academic-cap' },
   { label: 'Classes',            href: '/portal/classes',            requiredPermission: 'manage:classes',            icon: 'academic-cap' },
   { label: 'Chat',               href: '/portal/chat',               requiredPermission: 'use:chat',                  icon: 'chat' },
+  { label: 'My Account',         href: '/portal/account',            requiredPermission: 'use:chat',                  icon: 'user' },
 ]

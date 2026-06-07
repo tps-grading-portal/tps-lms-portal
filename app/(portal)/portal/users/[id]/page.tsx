@@ -53,7 +53,7 @@ export default async function EditUserPage({ params }: { params: Promise<{ id: s
   })
 
   return (
-    <div className="max-w-xl mx-auto">
+    <div className="w-full max-w-3xl">
       <h1 className="text-2xl font-bold text-tps-navy mb-1">Edit User</h1>
       <p className="text-gray-500 text-sm mb-6">{user.email}</p>
       <EditUserForm

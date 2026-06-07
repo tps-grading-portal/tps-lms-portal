@@ -252,6 +252,11 @@ model User {
   // Notifications
   notifications       Notification[]
 
+  // Custom calendar items + access requests
+  customScheduleItems CustomScheduleItem[] @relation("CustomItemCreator")
+  accessRequests      AccessRequest[]      @relation("AccessRequestUser")
+  accessReviews       AccessRequest[]      @relation("AccessRequestReviewer")
+
   // System admin actions
   auditLogs          AuditLog[]
 
@@ -319,6 +324,46 @@ model Notification {
   @@map("notifications")
 }
 
+// ── My Account: self-service access requests ─────────────────────────────────
+// Users request additional access (course owner, phase owner, role change,
+// department, other); someone with authority approves or denies. Nothing is
+// self-granted — approval applies the change and is audit-logged.
+
+enum AccessRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+}
+
+enum AccessRequestType {
+  COURSE_OWNER   // own a single course      → targetId = syllabusEventId
+  PHASE_OWNER    // own a whole phase/dept   → targetId = deptCode
+  DEPARTMENT     // dept access (chairs)     → targetId = deptCode
+  ROLE_CHANGE    // change account role      → targetId = UserRole
+  OTHER          // free-text request
+}
+
+model AccessRequest {
+  id           String              @id @default(cuid())
+  userId       String
+  type         AccessRequestType
+  targetId     String?             // event id / dept code / role, per type
+  targetLabel  String?             // human-readable target (e.g. "TF 6220A")
+  justification String?            @db.Text
+  status       AccessRequestStatus @default(PENDING)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  createdAt    DateTime            @default(now())
+
+  user       User  @relation("AccessRequestUser",     fields: [userId],       references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("AccessRequestReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status])
+  @@index([userId])
+  @@map("access_requests")
+}
+
 // System admin audit trail
 model AuditLog {
   id        String   @id @default(cuid())
@@ -365,6 +410,7 @@ model Class {
   flightScheduleEntries FlightScheduleEntry[]
   surveyDeployments     SurveyDeployment[]
   lessonPages           LessonPage[]
+  customScheduleItems   CustomScheduleItem[]
 
   @@map("classes")
 }
@@ -536,6 +582,26 @@ model AcademicWeek {
 
   @@unique([classId, weekNumber])
   @@map("academic_weeks")
+}
+
+// Free-text calendar items (briefings, socials, holidays, …) — not MCG events
+model CustomScheduleItem {
+  id              String   @id @default(cuid())
+  classId         String?  // null = applies to the whole school (all lanes)
+  title           String
+  notes           String?  @db.Text
+  scheduledDate   DateTime
+  scheduledTime   String   // HH:MM
+  durationMinutes Int      @default(60)
+  locationRoom    String?
+  createdById     String
+  createdAt       DateTime @default(now())
+
+  class     Class? @relation(fields: [classId],     references: [id], onDelete: Cascade)
+  createdBy User   @relation("CustomItemCreator", fields: [createdById], references: [id])
+
+  @@index([scheduledDate])
+  @@map("custom_schedule_items")
 }
 
 // Student's completion status for each event

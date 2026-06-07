@@ -12,7 +12,7 @@ export default async function NewUserPage() {
   if (!can(session.user.role, 'manage:users')) return null
 
   return (
-    <div className="max-w-xl mx-auto">
+    <div className="w-full max-w-3xl">
       <h1 className="text-2xl font-bold text-tps-navy mb-1">New User</h1>
       <p className="text-gray-500 text-sm mb-6">Create a portal account.</p>
       <NewUserForm />

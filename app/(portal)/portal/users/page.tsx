@@ -29,7 +29,7 @@ export default async function UsersPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="w-full">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">User Management</h1>

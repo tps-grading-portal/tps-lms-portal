@@ -58,7 +58,29 @@ export function PrereqGraph({ events }: { events: RoadmapEvent[] }) {
   const [hoverId,    setHoverId]    = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
+  // When a course is selected, collapse the graph down to just its prereq
+  // trace (the course + every ancestor feeding it) and re-lay it out compactly
+  // so the whole flow fits on screen instead of spreading across the full web.
+  const visibleEvents = useMemo(() => {
+    if (!selectedId) return events
+    const byId = new Map(events.map(e => [e.id, e]))
+    if (!byId.has(selectedId)) return events
+    const keep = new Set<string>()
+    const walk = (id: string) => {
+      if (keep.has(id)) return
+      keep.add(id)
+      const ev = byId.get(id)
+      if (!ev) return
+      for (const pid of ev.prerequisiteIds) {
+        if (byId.has(pid)) walk(pid)
+      }
+    }
+    walk(selectedId)
+    return events.filter(e => keep.has(e.id))
+  }, [events, selectedId])
+
   const { nodes, edges, width, height } = useMemo(() => {
+    const events = visibleEvents
     const levels = computeLevels(events)
     const idSet  = new Set(events.map(e => e.id))
 
@@ -109,18 +131,21 @@ export function PrereqGraph({ events }: { events: RoadmapEvent[] }) {
       width:  PAD * 2 + (maxLevel + 1) * NODE_W + maxLevel * COL_GAP,
       height: PAD * 2 + maxRows * NODE_H + (maxRows - 1) * ROW_GAP,
     }
-  }, [events])
+  }, [visibleEvents])
 
-  // Selected: trace the path FROM the beginning TO this course (ancestors
-  // only) — fades everything else so the route is easy to follow.
-  // Hover (when nothing is selected): the full connected web both directions.
+  // Selected: the graph is already collapsed to the trace — highlight all of
+  // it. Hover (when nothing is selected): the full connected web both ways.
   const highlight = useMemo(() => {
-    const focusId = selectedId ?? hoverId
-    if (!focusId) return null
+    if (selectedId) {
+      return {
+        edges: new Set(edges.map((_, i) => i)),
+        nodes: new Set(nodes.map(n => n.event.id)),
+      }
+    }
+    if (!hoverId) return null
 
     const connectedEdges = new Set<number>()
-    const connectedNodes = new Set<string>([focusId])
-    const ancestorsOnly = selectedId !== null
+    const connectedNodes = new Set<string>([hoverId])
 
     let changed = true
     while (changed) {
@@ -128,30 +153,22 @@ export function PrereqGraph({ events }: { events: RoadmapEvent[] }) {
       edges.forEach((edge, i) => {
         const fromId = edge.from.event.id
         const toId   = edge.to.event.id
-        if (ancestorsOnly) {
-          // Only walk backwards: edges that feed a connected node
-          if (connectedNodes.has(toId) && !connectedEdges.has(i)) {
-            connectedEdges.add(i)
-            if (!connectedNodes.has(fromId)) { connectedNodes.add(fromId); changed = true }
-          }
-        } else {
-          if ((connectedNodes.has(toId) || connectedNodes.has(fromId)) && !connectedEdges.has(i)) {
-            connectedEdges.add(i)
-            if (!connectedNodes.has(fromId)) { connectedNodes.add(fromId); changed = true }
-            if (!connectedNodes.has(toId))   { connectedNodes.add(toId);   changed = true }
-          }
+        if ((connectedNodes.has(toId) || connectedNodes.has(fromId)) && !connectedEdges.has(i)) {
+          connectedEdges.add(i)
+          if (!connectedNodes.has(fromId)) { connectedNodes.add(fromId); changed = true }
+          if (!connectedNodes.has(toId))   { connectedNodes.add(toId);   changed = true }
         }
       })
     }
     return { edges: connectedEdges, nodes: connectedNodes }
-  }, [selectedId, hoverId, edges])
+  }, [selectedId, hoverId, edges, nodes])
 
   if (events.length === 0) {
     return <div className="card text-center py-10 text-gray-400">No events match your filters.</div>
   }
 
   return (
-    <div className="card p-0 overflow-auto" style={{ maxHeight: '75vh' }}>
+    <div className="card p-0 overflow-auto w-full" style={{ height: 'calc(100vh - 16rem)', minHeight: 420 }}>
       <svg width={width} height={height} className="block">
         {/* Edges */}
         {edges.map((edge, i) => {
@@ -211,10 +228,20 @@ export function PrereqGraph({ events }: { events: RoadmapEvent[] }) {
         })}
       </svg>
 
-      <div className="sticky left-0 px-4 py-2 border-t border-gray-100 text-[10px] text-gray-400 bg-white">
-        {selectedId
-          ? 'Showing the trace from the beginning to the selected course — click it again to show all flows'
-          : 'Hover to preview a course’s web · click a course to trace the path from the beginning to it'}
+      <div className="sticky left-0 bottom-0 px-4 py-2 border-t border-gray-100 text-[10px] text-gray-400 bg-white flex items-center gap-3">
+        {selectedId ? (
+          <>
+            <span>Collapsed to the prereq flow for the selected course — click it again to show the full web</span>
+            <button
+              onClick={() => setSelectedId(null)}
+              className="text-tps-orange font-semibold hover:underline shrink-0"
+            >
+              Show all flows
+            </button>
+          </>
+        ) : (
+          'Hover to preview a course’s web · click a course to collapse down to its prereq flow'
+        )}
       </div>
     </div>
   )
