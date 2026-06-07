@@ -98,6 +98,7 @@ export default async function VaultPage({
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Title</th>
                 <th className="text-left px-3 py-3 font-semibold text-gray-700 w-28">Event</th>
                 <th className="text-left px-3 py-3 font-semibold text-gray-700 w-28">Status</th>
+                <th className="text-left px-3 py-3 font-semibold text-gray-700 w-36">Released To</th>
                 <th className="text-left px-3 py-3 font-semibold text-gray-700 w-28">Expiry</th>
                 <th className="text-left px-3 py-3 font-semibold text-gray-700 w-32">Submitted By</th>
                 <th className="text-left px-3 py-3 font-semibold text-gray-700 w-24">Date</th>
@@ -116,6 +117,13 @@ export default async function VaultPage({
                   uploaderName={`${c.uploadedBy.lastName}, ${c.uploadedBy.firstName}`}
                   eventCode={c.syllabusEvent?.courseCode ?? null}
                   uploadedAt={c.createdAt}
+                  releases={c.lessonFiles
+                    .filter(lf => lf.lessonPage.class)
+                    .map(lf => ({
+                      className:  lf.lessonPage.class!.name,
+                      approvedAt: lf.approvedForClassAt!.toISOString(),
+                    }))
+                    .sort((a, b) => b.approvedAt.localeCompare(a.approvedAt))}
                   role={role}
                 />
               ))}

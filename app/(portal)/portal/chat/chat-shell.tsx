@@ -503,6 +503,12 @@ export function ChatShell({ channels, currentUserId, className, classId }: Props
           return since ? [...prev, ...newOnes] : data.messages
         })
         latestSince.current = data.messages[data.messages.length - 1].sentAt
+
+        // The user is looking at this channel — anything that just arrived
+        // counts as read. Update lastReadAt and refresh the sidebar badge.
+        markChannelReadAction(channelId).then(() => {
+          window.dispatchEvent(new Event('tps-chat-read'))
+        })
       }
     } catch {
       // network error — poll will retry
@@ -516,8 +522,10 @@ export function ChatShell({ channels, currentUserId, className, classId }: Props
     setMessages([])
     latestSince.current = null
 
-    // Viewing a channel clears its unread state
-    markChannelReadAction(activeChannelId)
+    // Viewing a channel clears its unread state (and the sidebar badge)
+    markChannelReadAction(activeChannelId).then(() => {
+      window.dispatchEvent(new Event('tps-chat-read'))
+    })
 
     // Load last ~50 messages (no `since` = full initial load)
     fetchMessages(activeChannelId, null)

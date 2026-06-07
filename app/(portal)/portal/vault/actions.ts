@@ -256,6 +256,14 @@ export async function getVaultContents(filter?: { status?: ContentStatus }) {
       uploadedBy:    { select: { firstName: true, lastName: true } },
       syllabusEvent: { select: { courseCode: true, title: true } },
       workflow:      { select: { currentStatus: true } },
+      // Per-class releases — which classes this doc is approved for, and when
+      lessonFiles: {
+        where:  { approvedForClassAt: { not: null } },
+        select: {
+          approvedForClassAt: true,
+          lessonPage: { select: { class: { select: { name: true } } } },
+        },
+      },
     },
   })
 }

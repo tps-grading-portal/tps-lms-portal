@@ -38,11 +38,13 @@ type Props = {
   uploaderName:     string
   eventCode:        string | null
   uploadedAt:       Date
+  // Per-class releases, newest first
+  releases:         { className: string; approvedAt: string }[]
   role:             UserRole
 }
 
 export function VaultItemRow(props: Props) {
-  const { id, title, fileName, status, presentationCount, uploaderName, eventCode, uploadedAt, role } = props
+  const { id, title, fileName, status, presentationCount, uploaderName, eventCode, uploadedAt, releases, role } = props
   const [pending, startTransition] = useTransition()
   const [feedback, setFeedback] = useState<string | null>(null)
 
@@ -80,6 +82,23 @@ export function VaultItemRow(props: Props) {
         <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${STATUS_COLORS[status]}`}>
           {STATUS_LABELS[status]}
         </span>
+      </td>
+      <td className="px-3 py-3">
+        {releases.length === 0 ? (
+          <span className="text-gray-300 text-xs">{status === 'VAULT' ? 'No class yet' : '—'}</span>
+        ) : (
+          <div className="space-y-0.5">
+            {releases.slice(0, 2).map(r => (
+              <p key={r.className} className="text-xs text-gray-600">
+                <span className="font-semibold text-tps-navy">{r.className}</span>
+                <span className="text-gray-400"> · {new Date(r.approvedAt).toLocaleDateString()}</span>
+              </p>
+            ))}
+            {releases.length > 2 && (
+              <p className="text-[10px] text-gray-400">+{releases.length - 2} more</p>
+            )}
+          </div>
+        )}
       </td>
       <td className="px-3 py-3">
         {status === 'VAULT' ? expiryBadge(presentationCount) : <span className="text-gray-300 text-xs">—</span>}

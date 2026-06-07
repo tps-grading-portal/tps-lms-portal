@@ -23,6 +23,10 @@ export async function GET() {
 
   const visible = channels.filter(ch => !ch.isPrivate || isAdmin || ch.members.length > 0)
 
+  // Channels never opened count only recent traffic (last 7 days) so old
+  // history doesn't inflate the badge forever.
+  const recentCutoff = new Date(Date.now() - 7 * 86400_000)
+
   let unread = 0
   for (const ch of visible) {
     const lastReadAt = ch.members[0]?.lastReadAt ?? null
@@ -31,7 +35,7 @@ export async function GET() {
         channelId: ch.id,
         isDeleted: false,
         authorId:  { not: userId },
-        ...(lastReadAt ? { sentAt: { gt: lastReadAt } } : {}),
+        sentAt:    { gt: lastReadAt ?? recentCutoff },
       },
     })
   }

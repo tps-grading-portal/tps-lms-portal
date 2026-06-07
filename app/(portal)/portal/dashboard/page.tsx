@@ -12,7 +12,78 @@ export const dynamic = 'force-dynamic'
 function todayRange() {
   const start = new Date(); start.setHours(0, 0, 0, 0)
   const end   = new Date(); end.setHours(23, 59, 59, 999)
-  return { start, end }
+  const weekEnd = new Date(start.getTime() + 7 * 86400_000)
+  return { start, end, weekEnd }
+}
+
+type QuickLink = { href: string; title: string; description: string }
+
+function quickLinksFor(role: UserRole): QuickLink[] {
+  switch (role) {
+    case 'SYSTEM_ADMIN':
+      return [
+        { href: '/portal/users',             title: 'User Management',  description: 'Accounts, roles, privileges' },
+        { href: '/portal/classes',           title: 'Classes',          description: 'Cohorts, rosters, lifecycle' },
+        { href: '/portal/course-owners',     title: 'Course Owners',    description: 'Ownership coverage' },
+        { href: '/portal/weighting',         title: 'Weighting Matrix', description: 'Master grading source' },
+        { href: '/portal/vault',             title: 'Content Vault',    description: 'Review pipeline' },
+        { href: '/portal/surveys',           title: 'Surveys',          description: 'Deploy and sanitize' },
+        { href: '/portal/standings',         title: 'Standings',        description: 'Weighted rankings' },
+        { href: '/portal/grades/exports',    title: 'Gradebook Exports',description: 'Excel downloads' },
+      ]
+    case 'DEAN_COMMANDER':
+      return [
+        { href: '/portal/weighting',         title: 'Weighting Matrix', description: 'Adjust grade weights' },
+        { href: '/portal/standings',         title: 'Standings',        description: 'Weighted rankings' },
+        { href: '/portal/vault',             title: 'Dean Review',      description: 'Final content approvals' },
+        { href: '/portal/analytics',         title: 'Analytics',        description: 'Early warning system' },
+      ]
+    case 'A9_STANDARDS':
+      return [
+        { href: '/portal/vault',             title: 'Content Vault',    description: 'A9 review queue' },
+        { href: '/portal/surveys',           title: 'Surveys',          description: 'Sanitize and publish' },
+        { href: '/portal/analytics',         title: 'Analytics',        description: 'IRR and grader bias' },
+        { href: '/portal/standings',         title: 'Standings',        description: 'Weighted rankings' },
+      ]
+    case 'SCHEDULER':
+      return [
+        { href: '/portal/academic-schedule', title: 'Academic Schedule',description: 'Class calendars' },
+        { href: '/portal/grade',             title: 'Grade Queue',      description: 'Enter grades' },
+        { href: '/portal/grades/exports',    title: 'Gradebook Exports',description: 'Pull gradesheets' },
+        { href: '/portal/standings',         title: 'Standings',        description: 'Weighted rankings' },
+      ]
+    case 'STUDENT':
+      return [
+        { href: '/portal/syllabus',          title: 'Syllabus',         description: 'Your course roadmap' },
+        { href: '/portal/academic-schedule', title: 'Schedule',         description: 'Upcoming lessons' },
+        { href: '/portal/grades',            title: 'My Grades',        description: 'Scores and feedback' },
+        { href: '/portal/chat',              title: 'Chat',             description: 'Digital Squadron' },
+      ]
+    default: // chairs, ADO/DO, instructors
+      return [
+        { href: '/portal/grade',             title: 'Grade Queue',      description: 'Enter and submit grades' },
+        { href: '/portal/vault',             title: 'Content Vault',    description: 'Submit and review content' },
+        { href: '/portal/academic-schedule', title: 'Schedule',         description: 'Class calendars' },
+        { href: '/portal/standings',         title: 'Standings',        description: 'Class performance' },
+      ]
+  }
+}
+
+function QuickAccessGrid({ role }: { role: UserRole }) {
+  const links = quickLinksFor(role)
+  return (
+    <section>
+      <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Quick Access</h2>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {links.map(l => (
+          <Link key={l.href} href={l.href} className="card block hover:border-tps-orange hover:shadow-md transition-all group py-3">
+            <p className="font-semibold text-tps-navy group-hover:text-tps-orange transition-colors text-sm">{l.title}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{l.description}</p>
+          </Link>
+        ))}
+      </div>
+    </section>
+  )
 }
 
 /** Which review stage this role acts on (for the "needs your review" tile) */
@@ -33,7 +104,7 @@ export default async function DashboardPage() {
   if (!session?.user) redirect('/login')
 
   const { id: userId, role, firstName } = session.user
-  const { start, end } = todayRange()
+  const { start, end, weekEnd } = todayRange()
   const isStudent = role === 'STUDENT'
 
   // ── Student dashboard ────────────────────────────────────────────────────
@@ -187,6 +258,8 @@ export default async function DashboardPage() {
             )}
           </section>
         </div>
+
+        <QuickAccessGrid role={role} />
       </div>
     )
   }
@@ -195,10 +268,11 @@ export default async function DashboardPage() {
   const reviewStages = reviewStageFor(role)
   const canGrade = can(role, 'grade:queue')
 
-  const [todaysEvents, pendingReview, gradeCounts, classes, notifications, unownedCount] = await Promise.all([
+  const [weekEvents, pendingFiles, gradeCounts, classes, notifications, unownedCount] = await Promise.all([
+    // Next 7 days across active + planning classes
     db.classSyllabusSchedule.findMany({
       where: {
-        scheduledDate: { gte: start, lte: end },
+        scheduledDate: { gte: start, lte: weekEnd },
         class: { OR: [{ isActive: true }, { isPlanning: true }], archivedAt: null },
       },
       include: {
@@ -206,12 +280,17 @@ export default async function DashboardPage() {
         instructor:    { select: { firstName: true, lastName: true } },
         class:         { select: { name: true } },
       },
-      orderBy: { scheduledTime: 'asc' },
-      take: 10,
+      orderBy: [{ scheduledDate: 'asc' }, { scheduledTime: 'asc' }],
+      take: 14,
     }),
     reviewStages.length > 0
-      ? db.contentFile.count({ where: { status: { in: reviewStages }, isLatest: true } })
-      : Promise.resolve(0),
+      ? db.contentFile.findMany({
+          where:   { status: { in: reviewStages }, isLatest: true },
+          include: { syllabusEvent: { select: { courseCode: true } }, uploadedBy: { select: { firstName: true, lastName: true } } },
+          orderBy: { updatedAt: 'desc' },
+          take: 5,
+        })
+      : Promise.resolve([]),
     canGrade
       ? db.gradebookEntry.groupBy({
           by: ['status'],
@@ -238,6 +317,36 @@ export default async function DashboardPage() {
 
   const notStarted = gradeCounts.find(g => g.status === 'NOT_STARTED')?._count ?? 0
   const inProgress = gradeCounts.find(g => g.status === 'IN_PROGRESS')?._count ?? 0
+  const pendingReview = reviewStages.length > 0
+    ? await db.contentFile.count({ where: { status: { in: reviewStages }, isLatest: true } })
+    : 0
+
+  // Standings preview: top 3 per active class by avg submitted score
+  const standingsPreview: { className: string; top: { name: string; avg: number }[] }[] = []
+  if (can(role, 'view:all_standings')) {
+    for (const c of classes.filter(c => c.isActive)) {
+      const students = await db.student.findMany({
+        where:  { classId: c.id },
+        select: {
+          firstName: true, lastName: true, number: true,
+          entries: { where: { status: 'SUBMITTED', overallScore: { not: null } }, select: { overallScore: true } },
+        },
+      })
+      const ranked = students
+        .map(s => ({
+          name: `${s.lastName}, ${s.firstName}`.trim() || `#${s.number}`,
+          avg:  s.entries.length > 0 ? s.entries.reduce((sum, e) => sum + (e.overallScore ?? 0), 0) / s.entries.length : -1,
+        }))
+        .filter(s => s.avg >= 0)
+        .sort((a, b) => b.avg - a.avg)
+        .slice(0, 3)
+      if (ranked.length > 0) standingsPreview.push({ className: c.name, top: ranked })
+    }
+  }
+
+  const stageLabel: Record<string, string> = {
+    SANDBOX: 'Draft', PENDING_CHAIR: 'Dept Review', PENDING_A9: 'A9 Review', PENDING_DEAN: 'Dean Review',
+  }
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -288,38 +397,44 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Today's schedule */}
+        {/* This week's schedule */}
         <section className="card">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Today&apos;s Schedule</h2>
+            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Next 7 Days</h2>
             <Link href="/portal/academic-schedule" className="text-xs text-tps-blue hover:underline">Calendar →</Link>
           </div>
-          {todaysEvents.length === 0 ? (
-            <p className="text-sm text-gray-400 py-3">Nothing scheduled today.</p>
+          {weekEvents.length === 0 ? (
+            <p className="text-sm text-gray-400 py-3">Nothing scheduled this week.</p>
           ) : (
             <div className="space-y-2">
-              {todaysEvents.map(s => (
-                <Link
-                  key={s.id}
-                  href={`/portal/lessons/${encodeURIComponent(s.syllabusEvent.courseCode)}`}
-                  className="flex items-center gap-3 py-1.5 group"
-                >
-                  <span className="text-sm font-mono font-bold text-tps-navy w-14 shrink-0">
-                    {s.scheduledTime ?? '—'}
-                  </span>
-                  <span className="text-[10px] font-bold bg-tps-navy/10 text-tps-navy px-1.5 py-0.5 rounded shrink-0">
-                    {s.class.name}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-800 group-hover:text-tps-orange transition-colors truncate">
-                      <span className="font-mono font-semibold">{s.syllabusEvent.courseCode}</span> · {s.syllabusEvent.title}
-                    </p>
-                    <p className="text-xs text-gray-400 truncate">
-                      {s.locationRoom ?? ''}{s.instructor && ` · ${s.instructor.firstName} ${s.instructor.lastName}`}
-                    </p>
-                  </div>
-                </Link>
-              ))}
+              {weekEvents.map(s => {
+                const isToday = s.scheduledDate && s.scheduledDate >= start && s.scheduledDate <= end
+                return (
+                  <Link
+                    key={s.id}
+                    href={`/portal/lessons/${encodeURIComponent(s.syllabusEvent.courseCode)}?classId=${s.classId}`}
+                    className="flex items-center gap-3 py-1.5 group"
+                  >
+                    <div className="text-center w-12 shrink-0">
+                      <p className={`text-[10px] uppercase ${isToday ? 'text-tps-orange font-bold' : 'text-gray-400'}`}>
+                        {isToday ? 'Today' : s.scheduledDate?.toLocaleDateString('en-US', { weekday: 'short' })}
+                      </p>
+                      <p className="text-xs font-mono font-bold text-tps-navy">{s.scheduledTime ?? '—'}</p>
+                    </div>
+                    <span className="text-[10px] font-bold bg-tps-navy/10 text-tps-navy px-1.5 py-0.5 rounded shrink-0">
+                      {s.class.name}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-800 group-hover:text-tps-orange transition-colors truncate">
+                        <span className="font-mono font-semibold">{s.syllabusEvent.courseCode}</span> · {s.syllabusEvent.title}
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {s.locationRoom ?? ''}{s.instructor && ` · ${s.instructor.firstName} ${s.instructor.lastName}`}
+                      </p>
+                    </div>
+                  </Link>
+                )
+              })}
             </div>
           )}
         </section>
@@ -363,7 +478,64 @@ export default async function DashboardPage() {
             </div>
           )}
         </section>
+
+        {/* Awaiting your review — detail */}
+        {pendingFiles.length > 0 && (
+          <section className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Awaiting Your Review</h2>
+              <Link href="/portal/vault" className="text-xs text-tps-blue hover:underline">Vault →</Link>
+            </div>
+            <div className="space-y-2">
+              {pendingFiles.map(f => (
+                <Link
+                  key={f.id}
+                  href={f.syllabusEvent ? `/portal/lessons/${encodeURIComponent(f.syllabusEvent.courseCode)}` : '/portal/vault'}
+                  className="flex items-center gap-3 py-1.5 group"
+                >
+                  <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded shrink-0">
+                    {stageLabel[f.status] ?? f.status}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-800 group-hover:text-tps-orange transition-colors truncate">{f.title}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {f.syllabusEvent?.courseCode ?? 'No course'} · by {f.uploadedBy.firstName} {f.uploadedBy.lastName}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Standings preview */}
+        {standingsPreview.length > 0 && (
+          <section className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Standings — Top 3</h2>
+              <Link href="/portal/standings" className="text-xs text-tps-blue hover:underline">Full standings →</Link>
+            </div>
+            <div className="space-y-3">
+              {standingsPreview.map(sp => (
+                <div key={sp.className}>
+                  <p className="text-xs font-bold text-tps-navy mb-1">Class {sp.className}</p>
+                  <div className="space-y-1">
+                    {sp.top.map((s, i) => (
+                      <div key={s.name} className="flex items-center gap-2 text-sm">
+                        <span className="w-5 text-center font-bold text-gray-400">{i + 1}</span>
+                        <span className="flex-1 text-gray-700 truncate">{s.name}</span>
+                        <span className="font-bold tabular-nums text-tps-navy">{s.avg.toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
+
+      <QuickAccessGrid role={role} />
     </div>
   )
 }

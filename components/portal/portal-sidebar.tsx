@@ -24,7 +24,13 @@ function useChatUnread(): number {
     }
     load()
     const interval = setInterval(load, 30_000)
-    return () => { live = false; clearInterval(interval) }
+    // Instant refresh when the chat marks a channel read
+    window.addEventListener('tps-chat-read', load)
+    return () => {
+      live = false
+      clearInterval(interval)
+      window.removeEventListener('tps-chat-read', load)
+    }
   }, [pathname]) // refresh when navigating (e.g. leaving the chat page)
 
   return unread
