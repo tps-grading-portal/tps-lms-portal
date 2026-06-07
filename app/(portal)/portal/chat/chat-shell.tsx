@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { upload } from '@vercel/blob/client'
 import type { ChannelSummary, ChatAttachment } from './actions'
 import {
-  sendMessageAction, uploadChatAttachmentAction,
+  sendMessageAction,
   createChannelAction, archiveChannelAction, getChatMemberOptionsAction,
 } from './actions'
 import type { UserRole } from '@prisma/client'
@@ -213,17 +214,25 @@ function MessageInput({
     setUploading(true)
     try {
       for (const file of Array.from(files).slice(0, 5)) {
-        const fd = new FormData()
-        fd.set('file', file)
-        const result = await uploadChatAttachmentAction(fd)
-        if (result.ok) {
-          setPendingFiles(prev => [...prev, result.attachment])
-        } else {
-          setUploadError(result.error)
+        if (file.size > 25 * 1024 * 1024) {
+          setUploadError(`${file.name} exceeds the 25 MB limit.`)
+          continue
         }
+        // Direct browser → Blob upload (no serverless body-size cap)
+        const blob = await upload(file.name, file, {
+          access:          'public',
+          handleUploadUrl: '/api/blob-upload',
+          clientPayload:   JSON.stringify({ purpose: 'chat' }),
+        })
+        setPendingFiles(prev => [...prev, {
+          name:      file.name,
+          url:       blob.url,
+          mimeType:  blob.contentType ?? file.type ?? 'application/octet-stream',
+          sizeBytes: file.size,
+        }])
       }
-    } catch {
-      setUploadError('Attachment upload failed. Try again.')
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Attachment upload failed. Try again.')
     } finally {
       setUploading(false)
     }

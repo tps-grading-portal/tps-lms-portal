@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { moveScheduledEventAction, type ScheduleConflict, type WeekRow, type ScheduledEventRow } from './actions'
+import { moveScheduledEventAction, type ScheduleConflict, type ScheduledEventRow } from './actions'
 
 // Grid geometry — 0700 to 1800 in 30-minute rows
 const DAY_START_MIN = 7 * 60
@@ -48,9 +48,9 @@ type ConflictPrompt = {
 }
 
 export function WeekCalendar({
-  week, events, showTwoClasses, days, canEdit, onSlotClick, onEventClick, onExternalDrop,
+  weekStartISO, events, showTwoClasses, days, canEdit, onSlotClick, onEventClick, onExternalDrop,
 }: {
-  week:           WeekRow              // defines the date range + labels
+  weekStartISO:   string               // Monday of the visible week (YYYY-MM-DD)
   events:         ScheduledEventRow[]  // merged events of all visible classes, any class
   showTwoClasses: boolean
   days:           5 | 7                // weekend toggle
@@ -69,7 +69,7 @@ export function WeekCalendar({
   const DAY_LABELS = days === 7 ? DAY_LABELS_7 : DAY_LABELS_5
 
   // Events with a concrete date+time within this week's range
-  const weekStart = week.startDate.slice(0, 10)
+  const weekStart = weekStartISO
   const placed = events.filter(e => {
     if (!e.scheduledDate || !e.scheduledTime) return false
     const iso = e.scheduledDate.slice(0, 10)
@@ -162,7 +162,7 @@ export function WeekCalendar({
 
   return (
     <div className="card p-0 overflow-x-auto select-none">
-      <div style={{ minWidth: days === 7 ? 800 : 640 }}>
+      <div style={{ minWidth: days === 7 ? 1050 : 800 }}>
         {/* Day headers */}
         <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: `56px repeat(${days}, 1fr)` }}>
           <div />
@@ -236,13 +236,22 @@ export function WeekCalendar({
                   const height = Math.max(SLOT_PX, (durMin / SLOT_MIN) * SLOT_PX)
                   const colors = CLASS_COLORS[e.classColorIdx % CLASS_COLORS.length]
 
+                  // With two classes on the calendar, split each day column:
+                  // class 0 on the left half, class 1 on the right — both
+                  // visible even at the same time.
+                  const lane: React.CSSProperties = showTwoClasses
+                    ? e.classColorIdx % 2 === 0
+                      ? { left: 2, width: 'calc(50% - 3px)' }
+                      : { left: 'calc(50% + 1px)', width: 'calc(50% - 3px)' }
+                    : { left: 2, right: 2 }
+
                   return (
                     <div
                       key={e.scheduleId}
-                      className={`absolute left-0.5 right-0.5 rounded-md border-l-4 px-1.5 py-1 overflow-hidden text-left transition-shadow ${colors.block} ${
+                      className={`absolute rounded-md border-l-4 px-1.5 py-1 overflow-hidden text-left transition-shadow ${colors.block} ${
                         isDragging ? 'shadow-lg opacity-90 z-20' : 'z-10 hover:shadow-md'
                       } ${canEdit ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${!e.isConfirmed ? 'border-dashed' : ''}`}
-                      style={{ top, height }}
+                      style={{ top, height, ...lane }}
                       onPointerDown={ev => {
                         if (!canEdit) return
                         ev.preventDefault()

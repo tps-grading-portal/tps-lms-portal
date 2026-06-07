@@ -114,23 +114,24 @@ export default async function CourseOwnersPage() {
         </div>
       )}
 
-      {/* Coverage by MCG course */}
+      {/* Coverage by MCG course — collapsible to phase level */}
       {sortedDepts.map(([dept, deptRows]) => {
         const deptUnowned = deptRows.filter(r => r.owners.length === 0).length
         return (
-          <section key={dept}>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs font-bold text-tps-navy uppercase tracking-wider px-2">
+          <details key={dept} open={deptUnowned > 0} className="group">
+            <summary className="cursor-pointer list-none flex items-center gap-3 py-2 select-none">
+              <span className="text-gray-400 text-sm transition-transform group-open:rotate-90">▶</span>
+              <span className="text-xs font-bold text-tps-navy uppercase tracking-wider">
                 {dept} — {deptLabel(dept)}
               </span>
               <div className="h-px flex-1 bg-gray-200" />
-              <span className={`text-xs ${deptUnowned > 0 ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
-                {deptUnowned > 0 ? `${deptUnowned} unowned` : 'covered'}
+              <span className="text-xs text-gray-400">{deptRows.length} courses</span>
+              <span className={`text-xs ${deptUnowned > 0 ? 'text-amber-600 font-semibold' : 'text-green-600'}`}>
+                {deptUnowned > 0 ? `${deptUnowned} unowned` : 'covered ✓'}
               </span>
-            </div>
+            </summary>
 
-            <div className="card overflow-hidden p-0">
+            <div className="card overflow-hidden p-0 mt-1">
               <table className="w-full text-sm">
                 <tbody className="divide-y divide-gray-50">
                   {deptRows.map(r => (
@@ -164,7 +165,7 @@ export default async function CourseOwnersPage() {
                 </tbody>
               </table>
             </div>
-          </section>
+          </details>
         )
       })}
     </div>

@@ -14,6 +14,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   DEPT_CHAIR:       'Dept Chair',
   ADO:              'ADO',
   DO:               'DO',
+  SCHEDULER:        'Scheduler',
   LINE_INSTRUCTOR:  'Instructor',
   GUEST_INSTRUCTOR: 'Guest Instructor',
   STUDENT:          'Student',

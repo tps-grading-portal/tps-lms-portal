@@ -93,20 +93,29 @@ export async function advanceContentAction(
       include: { syllabusEvent: { select: { deptCode: true } } },
     })
 
+    // Review chain: Department → A9 → Dean → visible to students
     const TRANSITIONS: Record<ContentStatus, ContentStatus | null> = {
-      SANDBOX:        'PENDING_CHAIR',
+      SANDBOX:        'PENDING_CHAIR',   // legacy drafts enter the chain
       PENDING_CHAIR:  'PENDING_A9',
-      PENDING_A9:     'VAULT',
+      PENDING_A9:     'PENDING_DEAN',
+      PENDING_DEAN:   'VAULT',
       VAULT:          null,
       ARCHIVED:       null,
     }
 
     const { role } = user
     const isAnCfContent = content.syllabusEvent?.deptCode === 'AN' || content.syllabusEvent?.deptCode === 'CF'
+    const isAdmin = role === 'SYSTEM_ADMIN'
     const canAdvance =
-      role === 'SYSTEM_ADMIN' || role === 'A9_STANDARDS' ||
-      (role === 'DEPT_CHAIR' && content.status === 'SANDBOX') ||
-      ((role === 'ADO' || role === 'DO') && content.status === 'SANDBOX' && isAnCfContent)
+      isAdmin ||
+      // Department review step
+      ((content.status === 'SANDBOX' || content.status === 'PENDING_CHAIR') &&
+        (role === 'DEPT_CHAIR' || role === 'A9_STANDARDS' ||
+         ((role === 'ADO' || role === 'DO') && isAnCfContent))) ||
+      // A9 review step
+      (content.status === 'PENDING_A9' && role === 'A9_STANDARDS') ||
+      // Dean review step — final approval
+      (content.status === 'PENDING_DEAN' && role === 'DEAN_COMMANDER')
     if (!canAdvance) return { ok: false, error: 'Insufficient permissions for this transition.' }
 
     const nextStatus = TRANSITIONS[content.status]

@@ -2,7 +2,28 @@
 
 import { useState, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { uploadCourseContentAction, saveLessonAction, deleteLessonAction, detachFileFromLessonAction } from './actions'
+import { upload } from '@vercel/blob/client'
+import {
+  registerCourseContentAction, replaceContentFileAction, approveForStudentsAction,
+  saveLessonAction, deleteLessonAction, detachFileFromLessonAction,
+} from './actions'
+import { advanceContentAction } from '../../vault/actions'
+
+/** Browser → Blob direct upload (bypasses the 4.5 MB serverless body cap). */
+async function uploadToBlob(file: File) {
+  const blob = await upload(file.name, file, {
+    access:          'public',
+    handleUploadUrl: '/api/blob-upload',
+    clientPayload:   JSON.stringify({ purpose: 'vault' }),
+  })
+  return {
+    url:         blob.url,
+    pathname:    blob.pathname,
+    contentType: blob.contentType ?? file.type ?? null,
+    sizeBytes:   file.size,
+    fileName:    file.name,
+  }
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,12 +50,13 @@ export type LessonRow = {
 }
 
 type Props = {
-  syllabusEventId: string
-  courseFiles:     FileRow[]   // course-wide materials (lessonId null)
-  lessons:         LessonRow[]
-  canAuthor:       boolean     // scoped content authority (edit lessons/prereqs)
-  canUpload:       boolean     // may submit content (instructors)
-  isStudent:       boolean
+  syllabusEventId:  string
+  courseFiles:      FileRow[]   // course-wide materials (lessonId null)
+  lessons:          LessonRow[]
+  canAuthor:        boolean     // scoped content authority (edit lessons/prereqs)
+  canUpload:        boolean     // may submit content (instructors)
+  canApproveDirect: boolean     // A9 / Dean / Admin — approve for students now
+  isStudent:        boolean
 }
 
 function fmtSize(bytes: number | null) {
@@ -52,40 +74,139 @@ function fileKindLabel(mimeType: string | null, fileName: string | null): string
 
 // ── File row ──────────────────────────────────────────────────────────────────
 
-function FileItem({ file, canAuthor, onDetach }: { file: FileRow; canAuthor: boolean; onDetach: () => void }) {
+const PENDING_STAGE_LABELS: Record<string, string> = {
+  SANDBOX:       'Draft',
+  PENDING_CHAIR: 'Dept Review',
+  PENDING_A9:    'A9 Review',
+  PENDING_DEAN:  'Dean Review',
+}
+
+function FileItem({
+  file, canAuthor, canUpload, canApproveDirect, onDetach,
+}: {
+  file:             FileRow
+  canAuthor:        boolean
+  canUpload:        boolean
+  canApproveDirect: boolean
+  onDetach:         () => void
+}) {
+  const router = useRouter()
+  const replaceRef = useRef<HTMLInputElement>(null)
+  const [busy,  setBusy]  = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
   const approved = file.status === 'VAULT'
+  const pendingLabel = PENDING_STAGE_LABELS[file.status]
+
+  async function handleReplace(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setError(null)
+    setBusy('replace')
+    try {
+      const blob = await uploadToBlob(files[0])
+      const result = await replaceContentFileAction(file.contentFileId, blob)
+      if ('error' in result && result.error) { setError(result.error); return }
+      router.refresh()
+    } catch {
+      setError('Upload failed.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleRoute() {
+    setBusy('route')
+    setError(null)
+    const result = await advanceContentAction(file.contentFileId)
+    setBusy(null)
+    if (!result.ok) { setError(result.error ?? 'Failed'); return }
+    router.refresh()
+  }
+
+  async function handleApprove() {
+    if (!confirm(`Approve "${file.displayLabel || file.title}" for student display now?`)) return
+    setBusy('approve')
+    setError(null)
+    const result = await approveForStudentsAction(file.contentFileId)
+    setBusy(null)
+    if ('error' in result && result.error) { setError(result.error); return }
+    router.refresh()
+  }
+
   return (
-    <div className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
-      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-[9px] font-bold ${
-        approved ? 'bg-tps-navy/10 text-tps-navy' : 'bg-amber-50 text-amber-600'
-      }`}>
-        {fileKindLabel(file.mimeType, file.fileName)}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-800 truncate">
-          {file.displayLabel || file.title}
-        </p>
-        <p className="text-xs text-gray-400">
-          {fmtSize(file.fileSizeBytes)}
-          {!approved && (
-            <span className="ml-2 inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold">
-              ⏳ Pending Approval — not visible to students
-            </span>
+    <div className="py-2 border-b border-gray-50 last:border-0">
+      <div className="flex items-center gap-3">
+        <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-[9px] font-bold ${
+          approved ? 'bg-tps-navy/10 text-tps-navy' : 'bg-amber-50 text-amber-600'
+        }`}>
+          {fileKindLabel(file.mimeType, file.fileName)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-800 truncate">
+            {file.displayLabel || file.title}
+          </p>
+          <p className="text-xs text-gray-400">
+            {fmtSize(file.fileSizeBytes)}
+            {!approved && pendingLabel && (
+              <span className="ml-2 inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold">
+                ⏳ {pendingLabel} — not visible to students
+              </span>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+          {file.storageUrl && (
+            <a href={file.storageUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary text-xs px-3 py-1.5">
+              Open
+            </a>
           )}
-        </p>
+          {/* Open → modify/sign externally → resave as new version in place */}
+          {canUpload && (
+            <>
+              <input
+                ref={replaceRef}
+                type="file"
+                className="hidden"
+                onChange={e => { handleReplace(e.target.files); e.target.value = '' }}
+              />
+              <button
+                onClick={() => replaceRef.current?.click()}
+                disabled={!!busy}
+                className="btn-secondary text-xs px-2.5 py-1.5"
+                title="Upload a modified/signed version — replaces this file in place and re-enters review"
+              >
+                {busy === 'replace' ? '…' : 'New Version'}
+              </button>
+            </>
+          )}
+          {!approved && canAuthor && file.status !== 'PENDING_DEAN' && (
+            <button
+              onClick={handleRoute}
+              disabled={!!busy}
+              className="btn-secondary text-xs px-2.5 py-1.5"
+              title="Route to the next review step"
+            >
+              {busy === 'route' ? '…' : 'Route →'}
+            </button>
+          )}
+          {!approved && canApproveDirect && (
+            <button
+              onClick={handleApprove}
+              disabled={!!busy}
+              className="text-xs px-2.5 py-1.5 rounded-lg font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
+              title="Approve for student display now"
+            >
+              {busy === 'approve' ? '…' : 'Approve'}
+            </button>
+          )}
+          {canAuthor && (
+            <button onClick={onDetach} className="text-gray-300 hover:text-red-500 text-lg leading-none px-1" title="Remove from this page">
+              ×
+            </button>
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {file.storageUrl && (
-          <a href={file.storageUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary text-xs px-3 py-1.5">
-            Open
-          </a>
-        )}
-        {canAuthor && (
-          <button onClick={onDetach} className="text-gray-300 hover:text-red-500 text-lg leading-none" title="Remove from this page">
-            ×
-          </button>
-        )}
-      </div>
+      {error && <p className="text-xs text-red-600 mt-1 ml-12">{error}</p>}
     </div>
   )
 }
@@ -109,14 +230,20 @@ function UploadButton({
     setError(null)
     const file = files[0]
     startTx(async () => {
-      const fd = new FormData()
-      fd.set('syllabusEventId', syllabusEventId)
-      if (lessonId) fd.set('lessonId', lessonId)
-      fd.set('title', file.name.replace(/\.[^.]+$/, ''))
-      fd.set('file', file)
-      const result = await uploadCourseContentAction(fd)
-      if ('error' in result && result.error) { setError(result.error); return }
-      router.refresh()
+      try {
+        // Direct browser → Blob upload, then register metadata server-side
+        const blob = await uploadToBlob(file)
+        const result = await registerCourseContentAction({
+          syllabusEventId,
+          lessonId,
+          title: file.name.replace(/\.[^.]+$/, ''),
+          blob,
+        })
+        if ('error' in result && result.error) { setError(result.error); return }
+        router.refresh()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Upload failed.')
+      }
     })
   }
 
@@ -282,7 +409,7 @@ function LessonModal({
 // ── Main course content ───────────────────────────────────────────────────────
 
 export function CourseContent({
-  syllabusEventId, courseFiles, lessons, canAuthor, canUpload, isStudent,
+  syllabusEventId, courseFiles, lessons, canAuthor, canUpload, canApproveDirect, isStudent,
 }: Props) {
   const router = useRouter()
   const [lessonModal, setLessonModal] = useState<{ lesson: LessonRow | null } | null>(null)
@@ -319,15 +446,23 @@ export function CourseContent({
         ) : (
           <div>
             {courseFiles.map(f => (
-              <FileItem key={f.id} file={f} canAuthor={canAuthor} onDetach={() => detach(f.id)} />
+              <FileItem
+                key={f.id}
+                file={f}
+                canAuthor={canAuthor}
+                canUpload={canUpload}
+                canApproveDirect={canApproveDirect}
+                onDetach={() => detach(f.id)}
+              />
             ))}
           </div>
         )}
 
         {canUpload && !isStudent && (
           <p className="text-[11px] text-gray-400 mt-3 border-t border-gray-50 pt-2">
-            Uploads enter the A9 review pipeline (Sandbox → Chair → A9 → Vault).
-            Students see files only after A9 approval.
+            Uploads route automatically into review: Department → A9 → Dean.
+            Students see files only after final approval. Use “New Version” to
+            resave a modified/signed copy in place.
           </p>
         )}
       </section>
@@ -444,7 +579,14 @@ export function CourseContent({
                         ) : (
                           <div>
                             {lesson.files.map(f => (
-                              <FileItem key={f.id} file={f} canAuthor={canAuthor} onDetach={() => detach(f.id)} />
+                              <FileItem
+                                key={f.id}
+                                file={f}
+                                canAuthor={canAuthor}
+                                canUpload={canUpload}
+                                canApproveDirect={canApproveDirect}
+                                onDetach={() => detach(f.id)}
+                              />
                             ))}
                           </div>
                         )}

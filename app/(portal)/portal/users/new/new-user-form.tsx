@@ -13,6 +13,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string; description: string }[] = 
   { value: 'DEPT_CHAIR',       label: 'Dept Chair',       description: 'Content review, dept analytics — select department(s) below' },
   { value: 'ADO',              label: 'ADO',              description: 'Assistant Director of Operations — AN/CF authority' },
   { value: 'DO',               label: 'DO',               description: 'Director of Operations — AN/CF authority + scheduling' },
+  { value: 'SCHEDULER',        label: 'Scheduler',        description: 'Owns class schedules — full grade access, entry, and gradesheet pulls' },
   { value: 'A9_STANDARDS',     label: 'A9 Standards',     description: 'Content vault gatekeeper, survey shield' },
   { value: 'DEAN_COMMANDER',   label: 'Dean / Commander', description: 'Weighting matrix, standings, strategic view' },
   { value: 'SYSTEM_ADMIN',     label: 'System Admin',     description: 'Full system access' },

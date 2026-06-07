@@ -261,6 +261,203 @@ export async function uploadCourseContentAction(formData: FormData) {
   }
 }
 
+// ── Client-upload registration (files go browser → Blob directly) ────────────
+//
+// Per workflow policy, uploads enter the approval chain immediately:
+// Department review → A9 review → Dean review → visible to students.
+
+export type UploadedBlobMeta = {
+  url:         string
+  pathname:    string
+  contentType: string | null
+  sizeBytes:   number
+  fileName:    string
+}
+
+export async function registerCourseContentAction(data: {
+  syllabusEventId: string
+  lessonId:        string | null
+  title:           string
+  blob:            UploadedBlobMeta
+}) {
+  try {
+    const user = await requireAuth()
+    if (!can(user.role, 'submit:content')) return { error: 'Insufficient permissions to submit content.' }
+
+    const event = await db.syllabusEvent.findUnique({
+      where:  { id: data.syllabusEventId },
+      select: { id: true, courseCode: true, deptCode: true },
+    })
+    if (!event) return { error: 'Course not found.' }
+
+    const content = await db.contentFile.create({
+      data: {
+        title:           data.title || data.blob.fileName,
+        syllabusEventId: event.id,
+        uploadedById:    user.id,
+        status:          'PENDING_CHAIR', // auto-routed into the review chain
+        storageProvider: 'VERCEL_BLOB',
+        storageKey:      data.blob.pathname,
+        storageUrl:      data.blob.url,
+        fileSizeBytes:   data.blob.sizeBytes,
+        mimeType:        data.blob.contentType,
+        fileName:        data.blob.fileName,
+        isLatest:        true,
+        version:         1,
+      },
+    })
+
+    await db.contentWorkflow.create({
+      data: { contentFileId: content.id, submittedById: user.id, currentStatus: 'PENDING_CHAIR' },
+    })
+
+    // Attach to the course page (and lesson, if given)
+    const lessonPageId = await ensureLessonPage(event.id, user.id)
+    const maxOrder = await db.lessonPageFile.aggregate({
+      where: { lessonPageId },
+      _max:  { sortOrder: true },
+    })
+    await db.lessonPageFile.create({
+      data: {
+        lessonPageId,
+        lessonId:      data.lessonId,
+        contentFileId: content.id,
+        sortOrder:     (maxOrder._max.sortOrder ?? 0) + 1,
+      },
+    })
+
+    revalidatePath(`/portal/lessons/${event.courseCode}`)
+    revalidatePath('/portal/vault')
+    return { ok: true }
+  } catch (err) {
+    console.error('registerCourseContentAction:', err)
+    return { error: 'Failed to register the uploaded file.' }
+  }
+}
+
+// ── Versioned replace (open → modify/sign → resave in place) ─────────────────
+
+export async function replaceContentFileAction(contentFileId: string, blob: UploadedBlobMeta) {
+  try {
+    const user = await requireAuth()
+    if (!can(user.role, 'submit:content')) return { error: 'Insufficient permissions.' }
+
+    const old = await db.contentFile.findUnique({
+      where:   { id: contentFileId },
+      include: { syllabusEvent: { select: { courseCode: true } } },
+    })
+    if (!old) return { error: 'Original file not found.' }
+
+    // New version enters review at the department step
+    const next = await db.contentFile.create({
+      data: {
+        title:             old.title,
+        description:       old.description,
+        syllabusEventId:   old.syllabusEventId,
+        uploadedById:      user.id,
+        status:            'PENDING_CHAIR',
+        storageProvider:   'VERCEL_BLOB',
+        storageKey:        blob.pathname,
+        storageUrl:        blob.url,
+        fileSizeBytes:     blob.sizeBytes,
+        mimeType:          blob.contentType,
+        fileName:          blob.fileName,
+        version:           old.version + 1,
+        previousVersionId: old.id,
+        isLatest:          true,
+      },
+    })
+    await db.contentFile.update({ where: { id: old.id }, data: { isLatest: false } })
+
+    await db.contentWorkflow.create({
+      data: { contentFileId: next.id, submittedById: user.id, currentStatus: 'PENDING_CHAIR' },
+    })
+
+    // Keep it "in the same area": repoint course-page links to the new version
+    await db.lessonPageFile.updateMany({
+      where: { contentFileId: old.id },
+      data:  { contentFileId: next.id },
+    })
+
+    await db.auditLog.create({
+      data: {
+        userId:     user.id,
+        action:     'REPLACE_CONTENT_VERSION',
+        targetId:   next.id,
+        targetType: 'ContentFile',
+        metadata:   { previousVersionId: old.id, version: next.version, title: old.title },
+      },
+    })
+
+    if (old.syllabusEvent) revalidatePath(`/portal/lessons/${old.syllabusEvent.courseCode}`)
+    revalidatePath('/portal/vault')
+    return { ok: true }
+  } catch (err) {
+    console.error('replaceContentFileAction:', err)
+    return { error: 'Failed to save the new version.' }
+  }
+}
+
+// ── Direct approval — "ready to display to students" ─────────────────────────
+
+const DIRECT_APPROVERS = ['A9_STANDARDS', 'DEAN_COMMANDER', 'SYSTEM_ADMIN']
+
+export async function approveForStudentsAction(contentFileId: string) {
+  const user = await requireAuth()
+  if (!DIRECT_APPROVERS.includes(user.role)) {
+    return { error: 'Only A9, the Dean, or an admin can approve content for student display directly.' }
+  }
+
+  const content = await db.contentFile.findUnique({
+    where:   { id: contentFileId },
+    include: { syllabusEvent: { select: { courseCode: true, title: true, tracks: true } } },
+  })
+  if (!content) return { error: 'File not found.' }
+  if (content.status === 'VAULT') return { error: 'Already approved.' }
+
+  await db.contentFile.update({ where: { id: contentFileId }, data: { status: 'VAULT' } })
+  await db.contentWorkflow.updateMany({
+    where: { contentFileId },
+    data:  { currentStatus: 'VAULT', a9ReviewedById: user.id, a9ReviewedAt: new Date(), a9Notes: 'Direct approval for student display' },
+  })
+
+  await db.auditLog.create({
+    data: {
+      userId:     user.id,
+      action:     'DIRECT_APPROVE_CONTENT',
+      targetId:   contentFileId,
+      targetType: 'ContentFile',
+      metadata:   { title: content.title },
+    },
+  })
+
+  // Notify the class's students
+  if (content.syllabusEvent) {
+    const students = await db.student.findMany({
+      where: {
+        userId: { not: null },
+        track:  { in: content.syllabusEvent.tracks },
+        class:  { isActive: true, archivedAt: null },
+      },
+      select: { userId: true },
+    })
+    if (students.length > 0) {
+      await db.notification.createMany({
+        data: students.map(s => ({
+          userId: s.userId!,
+          title:  `New content available for ${content.syllabusEvent!.courseCode}`,
+          body:   `"${content.title}" is now available on the ${content.syllabusEvent!.courseCode} course page.`,
+          href:   `/portal/lessons/${encodeURIComponent(content.syllabusEvent!.courseCode)}`,
+        })),
+      })
+    }
+    revalidatePath(`/portal/lessons/${content.syllabusEvent.courseCode}`)
+  }
+
+  revalidatePath('/portal/vault')
+  return { ok: true }
+}
+
 // ── Prerequisite editing (scoped to content authority) ───────────────────────
 
 export async function addPrerequisiteAction(syllabusEventId: string, prerequisiteId: string, isHard: boolean) {

@@ -28,6 +28,9 @@ export type RoadmapData = {
   events: RoadmapEvent[]
   studentId: string | null
   studentName: string | null
+  // FTC (Pilot/CSO/RPA/FTE/ABM) or STC (Operator), derived from the
+  // student's crew position — dictates which courses apply to them
+  studentConcentration: 'FTC' | 'STC' | null
   // Course add/remove authority: 'all', or the list of dept codes the user controls
   editScope: { all: boolean; depts: DepartmentCode[] }
 }
@@ -37,6 +40,7 @@ export async function getRoadmapData(): Promise<RoadmapData> {
 
   let studentId: string | null = null
   let studentName: string | null = null
+  let studentTrack: Track | null = null
 
   if (user.role === 'STUDENT') {
     const student = await db.student.findFirst({
@@ -46,12 +50,21 @@ export async function getRoadmapData(): Promise<RoadmapData> {
     if (student) {
       studentId = student.id
       studentName = `${student.firstName} ${student.lastName}`.trim() || `Student`
+      studentTrack = student.track
     }
   }
 
-  // Fetch all active syllabus events
+  // Crew position → concentration designation
+  const studentConcentration: 'FTC' | 'STC' | null =
+    studentTrack === null ? null : studentTrack === 'OPERATOR' ? 'STC' : 'FTC'
+
+  // Students see only the courses that apply to their track (per MCG);
+  // staff see the full catalog.
   const raw = await db.syllabusEvent.findMany({
-    where: { isActive: true },
+    where: {
+      isActive: true,
+      ...(studentTrack ? { tracks: { has: studentTrack } } : {}),
+    },
     include: {
       prerequisites: { select: { prerequisiteId: true } },
       studentEvents: studentId
@@ -88,7 +101,7 @@ export async function getRoadmapData(): Promise<RoadmapData> {
     editScope = { all: scope.all, depts: scope.depts }
   }
 
-  return { events, studentId, studentName, editScope }
+  return { events, studentId, studentName, studentConcentration, editScope }
 }
 
 // ── Add a course to the syllabus (scoped to dept authority) ───────────────────

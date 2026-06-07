@@ -140,6 +140,19 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'schedule:academic',
     'view:academic_schedule',
   ],
+  SCHEDULER: [
+    // Owns class schedules; full grade access, entry, and gradesheet pulls
+    'schedule:academic',
+    'view:academic_schedule',
+    'grade:enter',
+    'grade:queue',
+    'view:all_standings',
+    'view:dept_standings',
+    'view:instructor_analytics',
+    'view:flight_schedule',
+    'use:chat',
+    'view:lessons',
+  ],
   LINE_INSTRUCTOR: [
     'submit:content',
     'grade:enter',

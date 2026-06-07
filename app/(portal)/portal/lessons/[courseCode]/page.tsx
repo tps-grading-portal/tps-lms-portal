@@ -199,6 +199,7 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
         lessons={lessons}
         canAuthor={canAuthor}
         canUpload={canUpload && !isStudent}
+        canApproveDirect={['A9_STANDARDS', 'DEAN_COMMANDER', 'SYSTEM_ADMIN'].includes(session.user.role)}
         isStudent={isStudent}
       />
 

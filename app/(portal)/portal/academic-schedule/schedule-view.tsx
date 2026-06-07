@@ -581,7 +581,7 @@ function EventCard({
 
 type Props = {
   classes:           { id: string; name: string; isActive: boolean }[]
-  activeClasses:     { id: string; name: string; colorIdx: number }[]
+  activeClasses:     { id: string; name: string; colorIdx: number; startDate: string | null }[]
   selectedClassId:   string
   selectedClassName: string
   classStartDate:    string | null
@@ -593,10 +593,25 @@ type Props = {
   canEdit:           boolean
 }
 
-function defaultWeekIndex(weeks: WeekRow[]): number {
-  const today = new Date().toISOString().slice(0, 10)
-  const idx = weeks.findIndex(w => w.startDate.slice(0, 10) <= today && today <= w.endDate.slice(0, 10))
-  return idx >= 0 ? idx : 0
+/** Monday (YYYY-MM-DD) of the week containing the given date. */
+function mondayOf(dateISO: string): string {
+  const d = new Date(`${dateISO}T12:00:00Z`)
+  const day = d.getUTCDay() // 0=Sun..6=Sat
+  d.setUTCDate(d.getUTCDate() + (day === 0 ? -6 : 1 - day))
+  return d.toISOString().slice(0, 10)
+}
+
+function shiftWeeks(mondayISO: string, weeks: number): string {
+  const d = new Date(`${mondayISO}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + weeks * 7)
+  return d.toISOString().slice(0, 10)
+}
+
+/** Week number of a class for a given week's Monday (Week 0 = first week). */
+function classWeekNumber(classStartISO: string, viewMondayISO: string): number {
+  const start = new Date(`${mondayOf(classStartISO)}T12:00:00Z`)
+  const view  = new Date(`${viewMondayISO}T12:00:00Z`)
+  return Math.round((view.getTime() - start.getTime()) / (7 * 86400_000))
 }
 
 type SessionsModalState = {
@@ -613,7 +628,8 @@ export function ScheduleView({
   const router = useRouter()
   const [weekForm,      setWeekForm]      = useState<WeekFormState | null>(null)
   const [viewMode,      setViewMode]      = useState<'calendar' | 'list'>('calendar')
-  const [weekIdx,       setWeekIdx]       = useState(() => defaultWeekIndex(weeks))
+  // Continuous calendar — starts at the current week, scrolls week by week
+  const [viewMonday,    setViewMonday]    = useState(() => mondayOf(new Date().toISOString().slice(0, 10)))
   const [showWeekend,   setShowWeekend]   = useState(false)
   const [panelClassId,  setPanelClassId]  = useState(selectedClassId)
   const [selectedEvent, setSelectedEvent] = useState<CatalogEvent | null>(null)
@@ -621,9 +637,13 @@ export function ScheduleView({
   const [dropConflicts, setDropConflicts] = useState<{ conflicts: ScheduleConflict[]; retry: () => void } | null>(null)
   const [, startTx] = useTransition()
 
-  const activeWeek = weeks[Math.min(weekIdx, Math.max(0, weeks.length - 1))] ?? null
   const panelClass = activeClasses.find(c => c.id === panelClassId) ?? activeClasses[0]
   const panelEvents = unscheduledByClass[panelClass?.id ?? ''] ?? []
+
+  const rangeEnd = new Date(new Date(`${viewMonday}T12:00:00Z`).getTime() + (showWeekend ? 6 : 4) * 86400_000)
+  const weekRangeLabel =
+    `${new Date(`${viewMonday}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ` +
+    rangeEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
   const classNameById = useMemo(() => new Map(classes.map(c => [c.id, c.name])), [classes])
 
@@ -754,50 +774,30 @@ export function ScheduleView({
         </div>
       </div>
 
-      {/* No weeks yet — generate from class dates */}
-      {weeks.length === 0 && canEdit && (
-        <GenerateWeeksPanel
-          classId={selectedClassId}
-          defaultStart={classStartDate}
-          defaultEnd={classEndDate}
-        />
-      )}
-      {weeks.length === 0 && !canEdit && (
-        <div className="card text-center py-16 text-gray-400 text-sm">
-          No academic schedule has been published yet.
-        </div>
-      )}
-
       {/* ── Calendar + side panel ── */}
-      {viewMode === 'calendar' && activeWeek && (
+      {viewMode === 'calendar' && (
         <div className="flex flex-col lg:flex-row gap-4 items-start">
           <div className="flex-1 min-w-0 space-y-3 w-full">
-            {/* Week navigation */}
+            {/* Week navigation — continuous, week by week */}
             <div className="flex items-center gap-2 flex-wrap">
               <button
-                onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
-                disabled={weekIdx === 0}
-                className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
+                onClick={() => setViewMonday(m => shiftWeeks(m, -1))}
+                className="btn-secondary text-sm px-3 py-1.5"
               >
-                ←
+                ← Prev Week
               </button>
-              <select
-                value={activeWeek.id}
-                onChange={e => setWeekIdx(weeks.findIndex(w => w.id === e.target.value))}
-                className="field-input w-auto text-sm font-medium"
-              >
-                {weeks.map(w => (
-                  <option key={w.id} value={w.id}>
-                    Week {w.weekNumber} · {fmtRange(w.startDate, w.endDate)}{w.theme ? ` · ${w.theme}` : ''}
-                  </option>
-                ))}
-              </select>
+              <span className="text-sm font-semibold text-tps-navy px-1">{weekRangeLabel}</span>
               <button
-                onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
-                disabled={weekIdx >= weeks.length - 1}
-                className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
+                onClick={() => setViewMonday(m => shiftWeeks(m, 1))}
+                className="btn-secondary text-sm px-3 py-1.5"
               >
-                →
+                Next Week →
+              </button>
+              <button
+                onClick={() => setViewMonday(mondayOf(new Date().toISOString().slice(0, 10)))}
+                className="text-xs text-tps-blue hover:underline px-1"
+              >
+                Today
               </button>
               {selectedEvent && (
                 <span className="text-xs bg-tps-orange/10 text-tps-orange font-semibold px-2.5 py-1.5 rounded-lg">
@@ -805,25 +805,31 @@ export function ScheduleView({
                   <button onClick={() => setSelectedEvent(null)} className="ml-1.5 text-tps-orange/60 hover:text-tps-orange">×</button>
                 </span>
               )}
-              {canEdit && (
-                <button
-                  onClick={() => setWeekForm({
-                    weekId: activeWeek.id,
-                    weekNumber: activeWeek.weekNumber.toString(),
-                    label: activeWeek.label,
-                    theme: activeWeek.theme ?? '',
-                    startDate: toInputDate(activeWeek.startDate),
-                    endDate: toInputDate(activeWeek.endDate),
-                  })}
-                  className="text-xs text-gray-400 hover:text-tps-navy ml-auto"
-                >
-                  Edit week
-                </button>
-              )}
             </div>
 
+            {/* Class week banners — where each active class is in its course */}
+            {activeClasses.some(c => c.startDate) && (
+              <div className="flex gap-2 flex-wrap">
+                {activeClasses.filter(c => c.startDate).map(c => {
+                  const n = classWeekNumber(c.startDate!, viewMonday)
+                  return (
+                    <div
+                      key={c.id}
+                      className={`flex-1 min-w-[180px] rounded-lg px-3 py-2 text-sm font-semibold ${
+                        c.colorIdx % 2 === 0 ? 'bg-blue-50 border border-blue-200 text-blue-900' : 'bg-amber-50 border border-amber-200 text-amber-900'
+                      }`}
+                    >
+                      Class {c.name} — {n < 0
+                        ? `starts in ${-n} week${n === -1 ? '' : 's'}`
+                        : `Week ${n}`}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
             <WeekCalendar
-              week={activeWeek}
+              weekStartISO={viewMonday}
               events={scheduled}
               showTwoClasses={activeClasses.length > 1}
               days={showWeekend ? 7 : 5}
@@ -847,6 +853,15 @@ export function ScheduleView({
             />
           )}
         </div>
+      )}
+
+      {/* List view setup — weeks records power the list grouping */}
+      {viewMode === 'list' && weeks.length === 0 && canEdit && (
+        <GenerateWeeksPanel
+          classId={selectedClassId}
+          defaultStart={classStartDate}
+          defaultEnd={classEndDate}
+        />
       )}
 
       {/* ── List view (selected class weeks) ── */}

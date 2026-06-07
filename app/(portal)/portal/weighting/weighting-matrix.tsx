@@ -140,6 +140,15 @@ export function WeightingMatrix({ events, catalog, weightMap }: Props) {
   const [error, setError]   = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [collapsedDepts, setCollapsedDepts] = useState<Set<string>>(new Set())
+
+  function toggleDept(dept: string) {
+    setCollapsedDepts(prev => {
+      const next = new Set(prev)
+      if (next.has(dept)) { next.delete(dept) } else { next.add(dept) }
+      return next
+    })
+  }
 
   // Local weight state: `${track}:${eventId}` → string (user is typing)
   const [localWeights, setLocalWeights] = useState<Record<string, string>>(() => {
@@ -292,12 +301,20 @@ export function WeightingMatrix({ events, catalog, weightMap }: Props) {
             <tbody className="divide-y divide-gray-50">
               {[...grouped.entries()].map(([dept, evts]) => (
                 <Fragment key={dept}>
-                  <tr className="bg-gray-50/80">
-                    <td colSpan={4} className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                  <tr
+                    className="bg-gray-50/80 cursor-pointer hover:bg-gray-100 transition-colors"
+                    onClick={() => toggleDept(dept)}
+                  >
+                    <td colSpan={4} className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                      <span className={`inline-block mr-2 transition-transform ${collapsedDepts.has(dept) ? '' : 'rotate-90'}`}>▶</span>
                       {dept} — {deptLabel(dept)}
+                      <span className="ml-2 normal-case font-normal tracking-normal">
+                        ({evts.length} event{evts.length === 1 ? '' : 's'} ·{' '}
+                        {evts.reduce((s, e) => s + (parseFloat(getWeight(e.id)) || 0), 0).toFixed(2)}%)
+                      </span>
                     </td>
                   </tr>
-                  {evts.map(e => (
+                  {!collapsedDepts.has(dept) && evts.map(e => (
                     <tr key={e.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="px-4 py-2 font-mono text-xs text-gray-600">{e.courseCode}</td>
                       <td className="px-4 py-2 text-gray-800">{e.title}</td>

@@ -10,31 +10,17 @@ import type { RoadmapEvent, RoadmapData } from './actions'
 import type { SyllabusEventStatus, DepartmentCode, Track, EventSuffix } from '@prisma/client'
 
 type Props = {
-  events:      RoadmapEvent[]
-  studentName: string | null
-  editScope:   RoadmapData['editScope']
+  events:               RoadmapEvent[]
+  studentName:          string | null
+  studentConcentration: 'FTC' | 'STC' | null
+  editScope:            RoadmapData['editScope']
 }
-
-// ── Concentration grouping (per MCG) ─────────────────────────────────────────
-// FTC: Pilot, CSO, RPA, FTE, ABM · STC: Operators · Common: both
 
 const FTC_TRACKS: Track[] = ['PILOT', 'RPA', 'FTE', 'CSO_WSO', 'ABM']
 
-type Concentration = 'FTC' | 'STC' | 'COMMON'
-
-const CONC_META: Record<Concentration, { label: string; sub: string }> = {
-  FTC:    { label: 'Flight Test Course (FTC)', sub: 'Pilot · CSO/WSO · RPA · FTE · ABM' },
-  STC:    { label: 'Space Test Course (STC)',  sub: 'Operators' },
-  COMMON: { label: 'Common Core',              sub: 'Shared FTC & STC curriculum' },
-}
-const CONC_ORDER: Concentration[] = ['COMMON', 'FTC', 'STC']
-
-function concentrationOf(tracks: Track[]): Concentration {
-  const hasFTC = tracks.some(t => FTC_TRACKS.includes(t))
-  const hasSTC = tracks.includes('OPERATOR')
-  if (hasFTC && hasSTC) return 'COMMON'
-  if (hasSTC) return 'STC'
-  return 'FTC'
+const CONC_LABELS = {
+  FTC: 'Flight Test Course (FTC)',
+  STC: 'Space Test Course (STC)',
 }
 
 const STATUS_META: Record<SyllabusEventStatus, { label: string; border: string; bg: string; dot: string }> = {
@@ -345,7 +331,7 @@ function AddCourseModal({ editScope, onClose }: { editScope: Props['editScope'];
 
 const ALL_STATUSES: (SyllabusEventStatus | 'all')[] = ['all', 'LOCKED', 'UPCOMING', 'IN_PROGRESS', 'COMPLETED', 'REVIEW']
 
-export function RoadmapView({ events, studentName, editScope }: Props) {
+export function RoadmapView({ events, studentName, studentConcentration, editScope }: Props) {
   const router = useRouter()
   const [filterStatus, setFilterStatus] = useState<SyllabusEventStatus | 'all'>('all')
   const [filterDept,   setFilterDept]   = useState<DepartmentCode | 'all'>('all')
@@ -378,22 +364,17 @@ export function RoadmapView({ events, studentName, editScope }: Props) {
     return list
   }, [events, filterStatus, filterDept, search])
 
-  // Concentration → dept → events
+  // Phase (dept) → events, in MCG order
   const grouped = useMemo(() => {
-    const result = new Map<Concentration, Map<DepartmentCode, RoadmapEvent[]>>()
+    const map = new Map<DepartmentCode, RoadmapEvent[]>()
     for (const e of filtered) {
-      const conc = concentrationOf(e.tracks)
-      if (!result.has(conc)) result.set(conc, new Map())
-      const deptMap = result.get(conc)!
-      if (!deptMap.has(e.deptCode)) deptMap.set(e.deptCode, [])
-      deptMap.get(e.deptCode)!.push(e)
+      if (!map.has(e.deptCode)) map.set(e.deptCode, [])
+      map.get(e.deptCode)!.push(e)
     }
-    for (const deptMap of result.values()) {
-      for (const list of deptMap.values()) {
-        list.sort((a, b) => a.courseCode.localeCompare(b.courseCode, undefined, { numeric: true }))
-      }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.courseCode.localeCompare(b.courseCode, undefined, { numeric: true }))
     }
-    return result
+    return new Map([...map.entries()].sort((a, b) => deptSortIndex(a[0]) - deptSortIndex(b[0])))
   }, [filtered])
 
   // Auto-expand sections when filtering/searching
@@ -420,10 +401,15 @@ export function RoadmapView({ events, studentName, editScope }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Student context banner */}
+      {/* Student context banner — crew position dictates FTC/STC */}
       {studentName && (
-        <div className="card bg-tps-navy text-white py-3">
+        <div className="card bg-tps-navy text-white py-3 flex items-center justify-between flex-wrap gap-2">
           <p className="text-sm font-semibold">Viewing roadmap for: {studentName}</p>
+          {studentConcentration && (
+            <span className="text-xs font-bold bg-white/15 px-2.5 py-1 rounded-lg">
+              {CONC_LABELS[studentConcentration]}
+            </span>
+          )}
         </div>
       )}
       {!hasStudentData && (
@@ -515,70 +501,50 @@ export function RoadmapView({ events, studentName, editScope }: Props) {
       {/* ── Prerequisite web (spiderweb graph) ── */}
       {flowMode && <PrereqGraph events={filtered} />}
 
-      {/* ── By-course view: FTC / STC / Common, collapsible courses ── */}
+      {/* ── By-phase view: collapsible course (dept) sections ── */}
       {!flowMode && (filtered.length === 0 ? (
         <div className="card text-center py-10 text-gray-400">No events match your filters.</div>
       ) : (
-        CONC_ORDER.map(conc => {
-          const deptMap = grouped.get(conc)
-          if (!deptMap || deptMap.size === 0) return null
-          const concTotal = [...deptMap.values()].reduce((n, l) => n + l.length, 0)
-          const sortedDepts = [...deptMap.entries()].sort((a, b) => deptSortIndex(a[0]) - deptSortIndex(b[0]))
+        <div className="space-y-3">
+          {[...grouped.entries()].map(([dept, deptEvents]) => {
+            const open = forceOpen || openSections.has(dept)
+            const completed = deptEvents.filter(e => e.status === 'COMPLETED').length
+            return (
+              <div key={dept} className="card p-0 overflow-hidden">
+                <button
+                  onClick={() => toggleSection(dept)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50/70 transition-colors"
+                >
+                  <span className={`text-gray-400 text-sm transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+                  <span className="text-xs font-bold font-mono text-tps-navy w-8">{dept}</span>
+                  <span className="text-sm font-semibold text-gray-700 flex-1">{deptLabel(dept)}</span>
+                  {hasStudentData && (
+                    <span className={`text-xs tabular-nums ${completed === deptEvents.length ? 'text-green-600 font-semibold' : 'text-gray-400'}`}>
+                      {completed}/{deptEvents.length} complete
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-400">{deptEvents.length} events</span>
+                </button>
 
-          return (
-            <section key={conc} className="space-y-3">
-              {/* Concentration banner */}
-              <div className="rounded-xl bg-tps-navy text-white px-4 py-3 flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <p className="font-bold text-sm">{CONC_META[conc].label}</p>
-                  <p className="text-xs text-white/60">{CONC_META[conc].sub}</p>
-                </div>
-                <span className="text-xs text-white/70">{concTotal} events</span>
-              </div>
-
-              {/* Collapsible course (dept) sections */}
-              {sortedDepts.map(([dept, deptEvents]) => {
-                const key = `${conc}:${dept}`
-                const open = forceOpen || openSections.has(key)
-                const completed = deptEvents.filter(e => e.status === 'COMPLETED').length
-                return (
-                  <div key={key} className="card p-0 overflow-hidden">
-                    <button
-                      onClick={() => toggleSection(key)}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50/70 transition-colors"
-                    >
-                      <span className={`text-gray-400 text-sm transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
-                      <span className="text-xs font-bold font-mono text-tps-navy w-8">{dept}</span>
-                      <span className="text-sm font-semibold text-gray-700 flex-1">{deptLabel(dept)}</span>
-                      {hasStudentData && (
-                        <span className={`text-xs tabular-nums ${completed === deptEvents.length ? 'text-green-600 font-semibold' : 'text-gray-400'}`}>
-                          {completed}/{deptEvents.length} complete
-                        </span>
-                      )}
-                      <span className="text-xs text-gray-400">{deptEvents.length} events</span>
-                    </button>
-
-                    {open && (
-                      <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {deptEvents.map(event => (
-                          <EventNode
-                            key={event.id}
-                            event={event}
-                            expanded={expandedId === event.id}
-                            onToggle={() => setExpandedId(expandedId === event.id ? null : event.id)}
-                            eventById={eventById}
-                            canEdit={canEditDept(event.deptCode)}
-                            onRemove={() => handleRemove(event)}
-                          />
-                        ))}
-                      </div>
-                    )}
+                {open && (
+                  <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {deptEvents.map(event => (
+                      <EventNode
+                        key={event.id}
+                        event={event}
+                        expanded={expandedId === event.id}
+                        onToggle={() => setExpandedId(expandedId === event.id ? null : event.id)}
+                        eventById={eventById}
+                        canEdit={canEditDept(event.deptCode)}
+                        onRemove={() => handleRemove(event)}
+                      />
+                    ))}
                   </div>
-                )
-              })}
-            </section>
-          )
-        })
+                )}
+              </div>
+            )
+          })}
+        </div>
       ))}
 
       {addOpen && <AddCourseModal editScope={editScope} onClose={() => setAddOpen(false)} />}

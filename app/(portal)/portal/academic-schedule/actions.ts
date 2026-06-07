@@ -202,11 +202,15 @@ export async function getScheduleDataAction(classId?: string) {
 
   return {
     classes: classes.map(c => ({ id: c.id, name: c.name, isActive: c.isActive })),
-    activeClasses: calendarClassIds.map(id => ({
-      id,
-      name:     classNameById.get(id) ?? '',
-      colorIdx: colorIdxByClass.get(id) ?? 0,
-    })),
+    activeClasses: calendarClassIds.map(id => {
+      const cls = classes.find(c => c.id === id)
+      return {
+        id,
+        name:      classNameById.get(id) ?? '',
+        colorIdx:  colorIdxByClass.get(id) ?? 0,
+        startDate: cls?.startDate?.toISOString().slice(0, 10) ?? null,
+      }
+    }),
     selectedClassId: selectedClass.id,
     selectedClassName: selectedClass.name,
     classStartDate: selectedClass.startDate?.toISOString().slice(0, 10) ?? null,

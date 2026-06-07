@@ -8,6 +8,7 @@ const STATUS_LABELS: Record<ContentStatus, string> = {
   SANDBOX:        'Draft',
   PENDING_CHAIR:  'Dept Review',
   PENDING_A9:     'A9 Review',
+  PENDING_DEAN:   'Dean Review',
   VAULT:          'In Vault',
   ARCHIVED:       'Archived',
 }
@@ -15,6 +16,7 @@ const STATUS_COLORS: Record<ContentStatus, string> = {
   SANDBOX:        'bg-gray-100   text-gray-600',
   PENDING_CHAIR:  'bg-amber-100  text-amber-700',
   PENDING_A9:     'bg-blue-100   text-blue-700',
+  PENDING_DEAN:   'bg-purple-100 text-purple-700',
   VAULT:          'bg-green-100  text-green-700',
   ARCHIVED:       'bg-red-100    text-red-500',
 }

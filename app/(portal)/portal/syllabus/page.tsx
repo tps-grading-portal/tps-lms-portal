@@ -15,7 +15,12 @@ export default async function SyllabusPage() {
       <p className="text-gray-500 text-sm mb-6">
         MCG course catalog — {data.events.length} events across all phases and departments
       </p>
-      <RoadmapView events={data.events} studentName={data.studentName} editScope={data.editScope} />
+      <RoadmapView
+        events={data.events}
+        studentName={data.studentName}
+        studentConcentration={data.studentConcentration}
+        editScope={data.editScope}
+      />
     </div>
   )
 }

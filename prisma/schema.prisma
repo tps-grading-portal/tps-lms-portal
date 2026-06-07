@@ -22,6 +22,7 @@ enum UserRole {
   DEPT_CHAIR       // Tactical oversight, dept-scoped analytics
   ADO              // Assistant Director of Operations — AN/CF authority
   DO               // Director of Operations — AN/CF authority + schedule confirm
+  SCHEDULER        // Owns class schedules + full grade access/entry/export
   LINE_INSTRUCTOR  // Grade entry, restricted analytics
   GUEST_INSTRUCTOR // Scoped to assigned courses only
   STUDENT          // Syllabus roadmap, own gradebook view
@@ -72,10 +73,11 @@ enum SyllabusEventStatus {
 }
 
 enum ContentStatus {
-  SANDBOX          // Submitted by instructor, not yet reviewed
-  PENDING_CHAIR    // Dept Chair reviewing
-  PENDING_A9       // A9 reviewing
-  VAULT            // Approved, in active vault
+  SANDBOX          // Legacy draft state (uploads now enter at PENDING_CHAIR)
+  PENDING_CHAIR    // Department review
+  PENDING_A9       // A9 review
+  PENDING_DEAN     // Dean review — final approval step
+  VAULT            // Approved, visible to students
   ARCHIVED         // Replaced/expired — offline archive only
 }
 
