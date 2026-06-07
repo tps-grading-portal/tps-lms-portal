@@ -22,6 +22,8 @@ export type RoadmapEvent = {
   score: number | null
   completedAt: Date | null
   prerequisiteIds: string[]
+  // Any session (past or future) on this class's calendar
+  isScheduled: boolean
 }
 
 export type RoadmapData = {
@@ -84,16 +86,18 @@ export async function getRoadmapData(classIdParam?: string): Promise<RoadmapData
     : []
   const excludedIds = new Set(exclusions.map(e => e.syllabusEventId))
 
-  // Scheduled (future) events for this class — drives UPCOMING status
+  // Scheduled events for this class — future sessions drive UPCOMING status,
+  // and any session at all marks the event "scheduled" (for the filter)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  const futureSchedules = viewClassId
+  const allSchedules = viewClassId
     ? await db.classSyllabusSchedule.findMany({
-        where:  { classId: viewClassId, scheduledDate: { gte: today } },
-        select: { syllabusEventId: true },
+        where:  { classId: viewClassId, scheduledDate: { not: null } },
+        select: { syllabusEventId: true, scheduledDate: true },
       })
     : []
-  const upcomingIds = new Set(futureSchedules.map(s => s.syllabusEventId))
+  const scheduledIds = new Set(allSchedules.map(s => s.syllabusEventId))
+  const upcomingIds  = new Set(allSchedules.filter(s => s.scheduledDate! >= today).map(s => s.syllabusEventId))
 
   // Students see only the courses that apply to their track (per MCG);
   // staff see the viewed class's full catalog.
@@ -118,9 +122,10 @@ export async function getRoadmapData(classIdParam?: string): Promise<RoadmapData
     .map((e) => {
       const se = (e.studentEvents as { status: SyllabusEventStatus; score: number | null; completedAt: Date | null }[] | undefined)?.[0] ?? null
       // Calendar-driven status: a LOCKED (or untracked) event scheduled for a
-      // future date for this class shows as UPCOMING
+      // future date for this class shows as UPCOMING — for students AND for
+      // staff viewing any class (incl. planning classes)
       let status: SyllabusEventStatus | null = se?.status ?? null
-      if (studentId && (status === null || status === 'LOCKED') && upcomingIds.has(e.id)) {
+      if ((status === null || status === 'LOCKED') && upcomingIds.has(e.id)) {
         status = 'UPCOMING'
       }
       return {
@@ -138,6 +143,7 @@ export async function getRoadmapData(classIdParam?: string): Promise<RoadmapData
         score:          se?.score ?? null,
         completedAt:    se?.completedAt ?? null,
         prerequisiteIds: e.prerequisites.map((p) => p.prerequisiteId),
+        isScheduled:    scheduledIds.has(e.id),
       }
     })
 

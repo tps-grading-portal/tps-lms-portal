@@ -29,14 +29,15 @@ export default async function ChatPage() {
   const channels = await getChannelsAction(activeClass.id)
 
   return (
-    <div className="w-full">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold text-tps-navy">Digital Squadron</h1>
-          <p className="text-gray-500 text-sm">
-            {channels.length} channel{channels.length !== 1 ? 's' : ''} · Class {activeClass.name}
-          </p>
-        </div>
+    // Fixed to the window: the page itself never scrolls — only the message
+    // history inside the shell does, and the text bar stays pinned at the
+    // bottom. Height = viewport − top nav (3.5rem) − main padding.
+    <div className="w-full h-[calc(100vh-5.5rem)] md:h-[calc(100vh-6.5rem)] flex flex-col overflow-hidden">
+      <div className="flex items-baseline gap-3 mb-3 shrink-0">
+        <h1 className="text-xl font-bold text-tps-navy">Digital Squadron</h1>
+        <p className="text-gray-500 text-xs">
+          {channels.length} channel{channels.length !== 1 ? 's' : ''} · Class {activeClass.name}
+        </p>
       </div>
 
       <ChatShell

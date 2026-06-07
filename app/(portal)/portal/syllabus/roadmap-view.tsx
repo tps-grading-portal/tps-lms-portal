@@ -104,6 +104,9 @@ function EventNode({ event, expanded, onToggle, eventById, canEdit, onRemove, vi
               Completed {new Date(event.completedAt).toLocaleDateString()}
             </span>
           )}
+          {!event.isScheduled && event.status !== 'COMPLETED' && (
+            <span className="text-[10px] text-amber-600 font-semibold">Not scheduled</span>
+          )}
         </div>
       </div>
 
@@ -353,13 +356,15 @@ function AddCourseModal({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-const ALL_STATUSES: (SyllabusEventStatus | 'all')[] = ['all', 'LOCKED', 'UPCOMING', 'IN_PROGRESS', 'COMPLETED', 'REVIEW']
+// 'UNSCHEDULED' = not completed and nothing on the class calendar yet
+type StatusFilter = SyllabusEventStatus | 'all' | 'UNSCHEDULED'
+const ALL_STATUSES: StatusFilter[] = ['all', 'UNSCHEDULED', 'LOCKED', 'UPCOMING', 'IN_PROGRESS', 'COMPLETED', 'REVIEW']
 
 export function RoadmapView({
   events, studentName, studentConcentration, viewClassId, viewClassName, classOptions, editScope,
 }: Props) {
   const router = useRouter()
-  const [filterStatus, setFilterStatus] = useState<SyllabusEventStatus | 'all'>('all')
+  const [filterStatus, setFilterStatus] = useState<StatusFilter>('all')
   const [filterDept,   setFilterDept]   = useState<DepartmentCode | 'all'>('all')
   const [expandedId,   setExpandedId]   = useState<string | null>(null)
   const [search,       setSearch]       = useState('')
@@ -381,7 +386,12 @@ export function RoadmapView({
 
   const filtered = useMemo(() => {
     let list = events
-    if (filterStatus !== 'all') list = list.filter(e => e.status === filterStatus)
+    if (filterStatus === 'UNSCHEDULED') {
+      // Not completed and not on the class calendar (past or future)
+      list = list.filter(e => !e.isScheduled && e.status !== 'COMPLETED')
+    } else if (filterStatus !== 'all') {
+      list = list.filter(e => e.status === filterStatus)
+    }
     if (filterDept   !== 'all') list = list.filter(e => e.deptCode === filterDept)
     if (search.trim())          list = list.filter(e =>
       e.courseCode.toLowerCase().includes(search.toLowerCase()) ||
@@ -535,7 +545,7 @@ export function RoadmapView({
                   : 'bg-white border border-gray-200 text-gray-600 hover:border-tps-orange hover:text-tps-orange'
               }`}
             >
-              {s === 'all' ? 'All' : STATUS_META[s as SyllabusEventStatus].label}
+              {s === 'all' ? 'All' : s === 'UNSCHEDULED' ? 'Unscheduled' : STATUS_META[s as SyllabusEventStatus].label}
             </button>
           ))}
         </div>

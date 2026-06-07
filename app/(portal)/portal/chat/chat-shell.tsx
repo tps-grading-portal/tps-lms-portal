@@ -591,7 +591,8 @@ export function ChatShell({ channels, currentUserId, className, classId }: Props
   }
 
   return (
-    <div className="flex h-[calc(100vh-8.5rem)] border border-gray-200 rounded-xl overflow-hidden bg-gray-50 shadow-sm">
+    // Fills the chat page's fixed-height column; only the message list scrolls
+    <div className="relative flex flex-1 min-h-0 border border-gray-200 rounded-xl overflow-hidden bg-gray-50 shadow-sm">
 
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
       <aside className={`

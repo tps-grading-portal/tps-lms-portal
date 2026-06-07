@@ -105,21 +105,32 @@ const ICONS: Record<string, React.ReactNode> = {
   ),
 }
 
+// Pages that live under a different path than their nav item
+const NAV_ALIASES: Record<string, string[]> = {
+  '/portal/grades':   ['/portal/grade', '/portal/analytics'],
+  '/portal/syllabus': ['/portal/lessons'],
+}
+
+function isNavActive(href: string, pathname: string): boolean {
+  if (href === '/portal/dashboard') return pathname === href
+  if (pathname.startsWith(href)) return true
+  return (NAV_ALIASES[href] ?? []).some(alias => pathname.startsWith(alias))
+}
+
 function SidebarLink({ href, label, icon, badge }: { href: string; label: string; icon: string; badge?: number }) {
   const pathname = usePathname()
-  const isActive = href === '/portal/dashboard'
-    ? pathname === '/portal/dashboard'
-    : pathname.startsWith(href)
+  const isActive = isNavActive(href, pathname)
 
   return (
     <Link
       href={href}
       className={cn(
-        'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors',
+        'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors border-l-[3px]',
         isActive
-          ? 'bg-tps-orange/10 text-tps-orange font-semibold'
-          : 'text-gray-600 hover:text-tps-navy hover:bg-gray-100',
+          ? 'bg-tps-orange/10 text-tps-orange font-bold border-tps-orange'
+          : 'text-gray-600 hover:text-tps-navy hover:bg-gray-100 border-transparent',
       )}
+      aria-current={isActive ? 'page' : undefined}
     >
       <span className="shrink-0">{ICONS[icon] ?? ICONS.home}</span>
       <span className="flex-1">{label}</span>
