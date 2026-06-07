@@ -27,7 +27,7 @@ export default async function SurveysPage({
 
   const classes = await db.class.findMany({
     where:   { archivedAt: null },
-    orderBy: { name: 'desc' },
+    orderBy: [{ isActive: 'desc' }, { name: 'desc' }],
     select:  { id: true, name: true },
   })
 

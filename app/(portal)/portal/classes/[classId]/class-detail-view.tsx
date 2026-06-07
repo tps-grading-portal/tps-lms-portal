@@ -263,13 +263,15 @@ function ClassSettingsModal({ cls, onClose }: { cls: ClassInfo; onClose: () => v
   const router = useRouter()
   const [pending, startTx] = useTransition()
   const [error,   setError] = useState<string | null>(null)
+  const [deactChoices, setDeactChoices] = useState<{ id: string; name: string }[] | null>(null)
+  const [deactPick,    setDeactPick]    = useState('')
 
   const [concentration, setConcentration] = useState<Concentration | ''>(cls.concentration ?? '')
   const [startDate,     setStartDate]     = useState(cls.startDate?.slice(0, 10) ?? '')
   const [endDate,       setEndDate]       = useState(cls.endDate?.slice(0, 10) ?? '')
   const [isActive,      setIsActive]      = useState(cls.isActive)
 
-  function handleSave() {
+  function handleSave(deactivateClassId: string | null = null) {
     setError(null)
     startTx(async () => {
       const result = await updateClassAction(cls.id, {
@@ -277,7 +279,12 @@ function ClassSettingsModal({ cls, onClose }: { cls: ClassInfo; onClose: () => v
         startDate:     startDate || null,
         endDate:       endDate || null,
         isActive,
+        deactivateClassId,
       })
+      if ('needsDeactivation' in result && result.needsDeactivation) {
+        setDeactChoices(result.needsDeactivation)
+        return
+      }
       if ('error' in result) { setError(result.error ?? 'Failed'); return }
       router.refresh()
       onClose()
@@ -328,8 +335,36 @@ function ClassSettingsModal({ cls, onClose }: { cls: ClassInfo; onClose: () => v
 
           {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
 
+          {/* Two-active-class limit */}
+          {deactChoices && (
+            <div className="rounded-lg bg-amber-50 border border-amber-300 px-3 py-3 space-y-2">
+              <p className="text-sm font-semibold text-amber-800">
+                ⚠ Two classes are already active. Choose which to deactivate:
+              </p>
+              {deactChoices.map(c => (
+                <label key={c.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="deact"
+                    checked={deactPick === c.id}
+                    onChange={() => setDeactPick(c.id)}
+                    className="text-tps-orange focus:ring-tps-orange"
+                  />
+                  Deactivate Class <strong>{c.name}</strong>
+                </label>
+              ))}
+              <button
+                onClick={() => { setDeactChoices(null); handleSave(deactPick) }}
+                disabled={!deactPick || pending}
+                className="w-full text-sm py-2 rounded-lg font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-40"
+              >
+                Deactivate &amp; Save
+              </button>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-2">
-            <button onClick={handleSave} disabled={pending} className="btn-primary flex-1 text-sm py-2.5">
+            <button onClick={() => handleSave()} disabled={pending} className="btn-primary flex-1 text-sm py-2.5">
               {pending ? 'Saving…' : 'Save'}
             </button>
             {!cls.archivedAt && (

@@ -44,6 +44,13 @@ export default async function EditUserPage({ params }: { params: Promise<{ id: s
       })
     : []
 
+  // Classes for student-to-class assignment (active classes first)
+  const classes = await db.class.findMany({
+    where:   { archivedAt: null },
+    orderBy: [{ isActive: 'desc' }, { name: 'desc' }],
+    select:  { id: true, name: true, isActive: true },
+  })
+
   return (
     <div className="max-w-xl mx-auto">
       <h1 className="text-2xl font-bold text-tps-navy mb-1">Edit User</h1>
@@ -69,6 +76,7 @@ export default async function EditUserPage({ params }: { params: Promise<{ id: s
               }
             : null,
         }}
+        classes={classes}
       />
 
       <div className="mt-5">

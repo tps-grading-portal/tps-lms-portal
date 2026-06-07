@@ -43,6 +43,7 @@ export default async function ChatPage() {
         channels={channels}
         currentUserId={user.id}
         className={activeClass.name}
+        classId={activeClass.id}
       />
     </div>
   )

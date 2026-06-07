@@ -71,9 +71,10 @@ export async function createUserAction(data: {
 // ── Update user ───────────────────────────────────────────────────────────────
 
 export async function updateUserAction(userId: string, data: {
-  firstName: string
-  lastName:  string
-  role:      UserRole
+  firstName:        string
+  lastName:         string
+  role:             UserRole
+  clearPrivileges?: boolean   // confirm clearing privileges when demoting to STUDENT
 }) {
   const actor = await requireAuth()
   if (!can(actor.role, 'manage:users')) return { error: 'Insufficient permissions' }
@@ -81,6 +82,41 @@ export async function updateUserAction(userId: string, data: {
   // Prevent demoting yourself out of admin
   if (userId === actor.id && data.role !== 'SYSTEM_ADMIN') {
     return { error: 'You cannot change your own role.' }
+  }
+
+  // Students must not retain instructor privileges. Demoting someone to
+  // STUDENT who still holds privileges requires explicit confirmation.
+  if (data.role === 'STUDENT') {
+    const [assignmentCount, deptCount, current] = await Promise.all([
+      db.courseAssignment.count({ where: { userId } }),
+      db.userDepartment.count({ where: { userId } }),
+      db.user.findUnique({ where: { id: userId }, select: { role: true } }),
+    ])
+    const privilegeCount = assignmentCount + deptCount
+    if (privilegeCount > 0 && !data.clearPrivileges) {
+      return {
+        needsPrivilegeClear: {
+          assignmentCount,
+          deptCount,
+          previousRole: current?.role ?? 'LINE_INSTRUCTOR',
+        },
+      }
+    }
+    if (privilegeCount > 0 && data.clearPrivileges) {
+      await db.$transaction([
+        db.courseAssignment.deleteMany({ where: { userId } }),
+        db.userDepartment.deleteMany({ where: { userId } }),
+      ])
+      await db.auditLog.create({
+        data: {
+          userId:     actor.id,
+          action:     'CLEAR_PRIVILEGES_ON_STUDENT_DEMOTION',
+          targetId:   userId,
+          targetType: 'User',
+          metadata:   { clearedAssignments: assignmentCount, clearedDepartments: deptCount },
+        },
+      })
+    }
   }
 
   await db.user.update({
@@ -104,6 +140,57 @@ export async function updateUserAction(userId: string, data: {
 
   revalidatePath('/portal/users')
   revalidatePath(`/portal/users/${userId}`)
+  return { ok: true }
+}
+
+// ── Link a STUDENT user to a class (creates their student profile) ────────────
+
+export async function linkStudentToClassAction(userId: string, classId: string, track: string) {
+  const actor = await requireAuth()
+  if (!can(actor.role, 'manage:users')) return { error: 'Insufficient permissions' }
+
+  const user = await db.user.findUnique({
+    where:   { id: userId },
+    include: { studentProfile: { select: { id: true } } },
+  })
+  if (!user)                    return { error: 'User not found.' }
+  if (user.role !== 'STUDENT')  return { error: 'Only STUDENT users can be linked to a class roster.' }
+  if (user.studentProfile)      return { error: 'This user already has a student profile.' }
+
+  const cls = await db.class.findUnique({ where: { id: classId }, select: { id: true, name: true } })
+  if (!cls) return { error: 'Class not found.' }
+
+  // Auto-assign next student number in the class
+  const max = await db.student.aggregate({ where: { classId }, _max: { number: true } })
+  const number = (max._max.number ?? 0) + 1
+
+  const { provisionStudentCurriculum } = await import('@/lib/student-provisioning')
+
+  const student = await db.student.create({
+    data: {
+      classId,
+      number,
+      track:     track as never,
+      firstName: user.firstName,
+      lastName:  user.lastName,
+      email:     user.email,
+      userId:    user.id,
+    },
+  })
+  await provisionStudentCurriculum(student.id, student.track)
+
+  await db.auditLog.create({
+    data: {
+      userId:     actor.id,
+      action:     'LINK_STUDENT_TO_CLASS',
+      targetId:   userId,
+      targetType: 'User',
+      metadata:   { classId, className: cls.name, track, studentNumber: number },
+    },
+  })
+
+  revalidatePath(`/portal/users/${userId}`)
+  revalidatePath(`/portal/classes/${classId}`)
   return { ok: true }
 }
 

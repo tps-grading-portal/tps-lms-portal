@@ -11,6 +11,11 @@ import type { Track } from '@prisma/client'
 export type ScheduledEventRow = {
   scheduleId:      string
   syllabusEventId: string
+  classId:         string
+  className:       string
+  classColorIdx:   number          // 0/1 — visual distinction between active classes
+  sessionNumber:   number
+  sessionCount:    number          // total sessions of this event for this class
   courseCode:      string
   title:           string
   deptCode:        string
@@ -40,13 +45,14 @@ export type WeekRow = {
 }
 
 export type CatalogEvent = {
-  id:         string
-  courseCode: string
-  title:      string
-  deptCode:   string
-  phase:      number
-  tracks:     Track[]
-  isGraded:   boolean
+  id:              string
+  courseCode:      string
+  title:           string
+  deptCode:        string
+  phase:           number
+  tracks:          Track[]
+  isGraded:        boolean
+  defaultDuration: number | null   // minutes — pre-fills the scheduler
 }
 
 export type InstructorOption = { id: string; name: string }
@@ -59,21 +65,30 @@ export async function getScheduleDataAction(classId?: string) {
 
   const classes = await db.class.findMany({
     where:   { archivedAt: null },
-    orderBy: { name: 'desc' },
+    orderBy: [{ isActive: 'desc' }, { name: 'desc' }],
     select:  { id: true, name: true, isActive: true, startDate: true, endDate: true },
   })
 
+  // Both active classes appear on the calendar; the "panel class" (toggle)
+  // dictates which class new events are scheduled into.
+  const activeClasses = classes.filter(c => c.isActive)
   const selectedClass = classId
-    ? classes.find(c => c.id === classId) ?? classes.find(c => c.isActive) ?? classes[0]
-    : classes.find(c => c.isActive) ?? classes[0]
+    ? classes.find(c => c.id === classId) ?? activeClasses[0] ?? classes[0]
+    : activeClasses[0] ?? classes[0]
 
   if (!selectedClass) {
     return {
       classes: classes.map(c => ({ id: c.id, name: c.name, isActive: c.isActive })),
+      activeClasses: [],
       selectedClassId: null, classStartDate: null, classEndDate: null,
-      weeks: [], unscheduled: [], catalog: [], instructors: [], canEdit, studentTrack: null,
+      weeks: [], scheduled: [], unscheduledByClass: {}, instructors: [], canEdit, studentTrack: null,
     }
   }
+
+  // Calendar shows the selected class + any other active class
+  const calendarClassIds = [...new Set([selectedClass.id, ...activeClasses.map(c => c.id)])]
+  const colorIdxByClass = new Map(calendarClassIds.map((id, i) => [id, i]))
+  const classNameById = new Map(classes.map(c => [c.id, c.name]))
 
   // Student track filter — students only see events for their track
   let studentTrack: Track | null = null
@@ -88,7 +103,7 @@ export async function getScheduleDataAction(classId?: string) {
       orderBy: { weekNumber: 'asc' },
     }),
     db.classSyllabusSchedule.findMany({
-      where:   { classId: selectedClass.id },
+      where:   { classId: { in: calendarClassIds } },
       include: {
         syllabusEvent: {
           select: {
@@ -103,18 +118,33 @@ export async function getScheduleDataAction(classId?: string) {
     db.syllabusEvent.findMany({
       where:   { isActive: true },
       orderBy: [{ phase: 'asc' }, { sortOrder: 'asc' }],
-      select:  { id: true, courseCode: true, title: true, deptCode: true, phase: true, tracks: true, isGraded: true },
+      select:  {
+        id: true, courseCode: true, title: true, deptCode: true, phase: true,
+        tracks: true, isGraded: true, defaultDurationMinutes: true,
+      },
     }),
     db.user.findMany({
-      where:   { isActive: true, role: { in: ['LINE_INSTRUCTOR', 'DEPT_CHAIR', 'SYSTEM_ADMIN'] } },
+      where:   { isActive: true, role: { in: ['LINE_INSTRUCTOR', 'GUEST_INSTRUCTOR', 'DEPT_CHAIR', 'ADO', 'DO', 'SYSTEM_ADMIN'] } },
       orderBy: { lastName: 'asc' },
       select:  { id: true, firstName: true, lastName: true },
     }),
   ])
 
+  // Session counts per (classId, eventId)
+  const sessionCounts = new Map<string, number>()
+  for (const s of schedules) {
+    const key = `${s.classId}:${s.syllabusEventId}`
+    sessionCounts.set(key, (sessionCounts.get(key) ?? 0) + 1)
+  }
+
   const toRow = (s: typeof schedules[number]): ScheduledEventRow => ({
     scheduleId:      s.id,
     syllabusEventId: s.syllabusEvent.id,
+    classId:         s.classId,
+    className:       classNameById.get(s.classId) ?? '',
+    classColorIdx:   colorIdxByClass.get(s.classId) ?? 0,
+    sessionNumber:   s.sessionNumber,
+    sessionCount:    sessionCounts.get(`${s.classId}:${s.syllabusEventId}`) ?? 1,
     courseCode:      s.syllabusEvent.courseCode,
     title:           s.syllabusEvent.title,
     deptCode:        s.syllabusEvent.deptCode,
@@ -138,6 +168,8 @@ export async function getScheduleDataAction(classId?: string) {
     ? schedules.filter(s => s.syllabusEvent.tracks.includes(studentTrack))
     : schedules
 
+  const scheduled = visibleSchedules.map(toRow)
+
   const weekRows: WeekRow[] = weeks.map(w => ({
     id:         w.id,
     weekNumber: w.weekNumber,
@@ -145,31 +177,61 @@ export async function getScheduleDataAction(classId?: string) {
     theme:      w.theme,
     startDate:  w.startDate.toISOString(),
     endDate:    w.endDate.toISOString(),
-    events: visibleSchedules
-      .filter(s => s.academicWeekId === w.id)
-      .map(toRow)
+    events: scheduled
+      .filter(s => s.classId === selectedClass.id && s.academicWeekId === w.id)
       .sort((a, b) => (a.scheduledDate ?? '').localeCompare(b.scheduledDate ?? '') || (a.scheduledTime ?? '').localeCompare(b.scheduledTime ?? '')),
   }))
 
-  const unscheduled = visibleSchedules.filter(s => !s.academicWeekId).map(toRow)
-
-  // Catalog events not yet scheduled for this class (for the "add" picker)
-  const scheduledEventIds = new Set(schedules.map(s => s.syllabusEventId))
-  const availableCatalog: CatalogEvent[] = catalog.filter(e => !scheduledEventIds.has(e.id))
+  // Per active class: catalog events that still need scheduling
+  const unscheduledByClass: Record<string, CatalogEvent[]> = {}
+  for (const cid of calendarClassIds) {
+    const scheduledIds = new Set(schedules.filter(s => s.classId === cid).map(s => s.syllabusEventId))
+    unscheduledByClass[cid] = catalog
+      .filter(e => !scheduledIds.has(e.id))
+      .map(e => ({
+        id:              e.id,
+        courseCode:      e.courseCode,
+        title:           e.title,
+        deptCode:        e.deptCode,
+        phase:           e.phase,
+        tracks:          e.tracks,
+        isGraded:        e.isGraded,
+        defaultDuration: e.defaultDurationMinutes,
+      }))
+  }
 
   return {
     classes: classes.map(c => ({ id: c.id, name: c.name, isActive: c.isActive })),
+    activeClasses: calendarClassIds.map(id => ({
+      id,
+      name:     classNameById.get(id) ?? '',
+      colorIdx: colorIdxByClass.get(id) ?? 0,
+    })),
     selectedClassId: selectedClass.id,
     selectedClassName: selectedClass.name,
     classStartDate: selectedClass.startDate?.toISOString().slice(0, 10) ?? null,
     classEndDate:   selectedClass.endDate?.toISOString().slice(0, 10) ?? null,
     weeks: weekRows,
-    unscheduled,
-    catalog: availableCatalog,
+    scheduled,
+    unscheduledByClass,
     instructors: instructors.map(i => ({ id: i.id, name: `${i.firstName} ${i.lastName}`.trim() })),
     canEdit,
     studentTrack,
   }
+}
+
+// ── Default course length (makes scheduling easy) ────────────────────────────
+
+export async function setDefaultDurationAction(syllabusEventId: string, minutes: number | null) {
+  const user = await requireAuth()
+  if (!can(user.role, 'schedule:academic')) return { error: 'Insufficient permissions' }
+
+  await db.syllabusEvent.update({
+    where: { id: syllabusEventId },
+    data:  { defaultDurationMinutes: minutes },
+  })
+  revalidatePath('/portal/academic-schedule')
+  return { ok: true }
 }
 
 // ── Week CRUD ─────────────────────────────────────────────────────────────────
@@ -349,6 +411,15 @@ async function findConflicts(
   return conflicts
 }
 
+async function weekForDate(classId: string, dateISO: string): Promise<string | null> {
+  const d = new Date(`${dateISO}T12:00:00Z`)
+  const week = await db.academicWeek.findFirst({
+    where:  { classId, startDate: { lte: d }, endDate: { gte: d } },
+    select: { id: true },
+  })
+  return week?.id ?? null
+}
+
 export async function scheduleEventAction(classId: string, syllabusEventId: string, data: {
   academicWeekId:  string | null
   instructorId:    string | null
@@ -376,16 +447,11 @@ export async function scheduleEventAction(classId: string, syllabusEventId: stri
   // Auto-assign the week containing the scheduled date if not set
   let academicWeekId = data.academicWeekId
   if (!academicWeekId && data.scheduledDate) {
-    const d = new Date(`${data.scheduledDate}T12:00:00Z`)
-    const week = await db.academicWeek.findFirst({
-      where: { classId, startDate: { lte: d }, endDate: { gte: d } },
-      select: { id: true },
-    })
-    academicWeekId = week?.id ?? null
+    academicWeekId = await weekForDate(classId, data.scheduledDate)
   }
 
   await db.classSyllabusSchedule.upsert({
-    where:  { classId_syllabusEventId: { classId, syllabusEventId } },
+    where:  { classId_syllabusEventId_sessionNumber: { classId, syllabusEventId, sessionNumber: 1 } },
     update: {
       academicWeekId,
       instructorId:    data.instructorId,
@@ -397,6 +463,7 @@ export async function scheduleEventAction(classId: string, syllabusEventId: stri
     create: {
       classId,
       syllabusEventId,
+      sessionNumber:   1,
       academicWeekId,
       instructorId:    data.instructorId,
       scheduledDate:   data.scheduledDate ? new Date(data.scheduledDate) : null,
@@ -406,6 +473,65 @@ export async function scheduleEventAction(classId: string, syllabusEventId: stri
     },
   })
 
+  revalidatePath('/portal/academic-schedule')
+  return { ok: true }
+}
+
+// ── Multi-day sessions: replace all sessions of an event for a class ─────────
+
+export async function saveEventSessionsAction(
+  classId:         string,
+  syllabusEventId: string,
+  base: {
+    instructorId: string | null
+    locationRoom: string | null
+  },
+  sessions: { date: string; time: string; durationMinutes: number }[],
+  override = false,
+) {
+  const user = await requireAuth()
+  if (!can(user.role, 'schedule:academic')) return { error: 'Insufficient permissions' }
+  if (sessions.length === 0) return { error: 'At least one session is required.' }
+
+  // Conflict-check every session
+  if (!override) {
+    const allConflicts: ScheduleConflict[] = []
+    for (const s of sessions) {
+      const conflicts = await findConflicts(classId, syllabusEventId, s.date, s.time, s.durationMinutes)
+      allConflicts.push(...conflicts)
+    }
+    if (allConflicts.length > 0) return { conflicts: allConflicts }
+  }
+
+  // Replace sessions
+  await db.classSyllabusSchedule.deleteMany({ where: { classId, syllabusEventId } })
+  for (let i = 0; i < sessions.length; i++) {
+    const s = sessions[i]
+    await db.classSyllabusSchedule.create({
+      data: {
+        classId,
+        syllabusEventId,
+        sessionNumber:   i + 1,
+        academicWeekId:  await weekForDate(classId, s.date),
+        instructorId:    base.instructorId,
+        locationRoom:    base.locationRoom,
+        scheduledDate:   new Date(s.date),
+        scheduledTime:   s.time,
+        durationMinutes: s.durationMinutes,
+      },
+    })
+  }
+
+  revalidatePath('/portal/academic-schedule')
+  return { ok: true }
+}
+
+// Remove ALL sessions of an event from a class schedule
+export async function unscheduleAllSessionsAction(classId: string, syllabusEventId: string) {
+  const user = await requireAuth()
+  if (!can(user.role, 'schedule:academic')) return { error: 'Insufficient permissions' }
+
+  await db.classSyllabusSchedule.deleteMany({ where: { classId, syllabusEventId } })
   revalidatePath('/portal/academic-schedule')
   return { ok: true }
 }

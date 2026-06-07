@@ -15,7 +15,7 @@ export default async function ClassesPage() {
   if (!can(role, 'manage:classes')) return null
 
   const classes = await db.class.findMany({
-    orderBy: { name: 'desc' },
+    orderBy: [{ isActive: 'desc' }, { name: 'desc' }],
     include: { _count: { select: { students: true } } },
   })
 

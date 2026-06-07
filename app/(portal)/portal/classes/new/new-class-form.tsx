@@ -9,6 +9,8 @@ export function NewClassForm() {
   const router = useRouter()
   const [pending, startTx] = useTransition()
   const [error,   setError] = useState<string | null>(null)
+  const [deactChoices, setDeactChoices] = useState<{ id: string; name: string }[] | null>(null)
+  const [deactPick,    setDeactPick]    = useState('')
 
   const [name,          setName]          = useState('')
   const [concentration, setConcentration] = useState<Concentration | ''>('')
@@ -16,8 +18,7 @@ export function NewClassForm() {
   const [endDate,       setEndDate]       = useState('')
   const [isActive,      setIsActive]      = useState(false)
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  function submit(deactivateClassId: string | null) {
     setError(null)
     if (!name.trim()) { setError('Class name is required.'); return }
 
@@ -28,10 +29,20 @@ export function NewClassForm() {
         startDate:     startDate || null,
         endDate:       endDate || null,
         isActive,
+        deactivateClassId,
       })
+      if ('needsDeactivation' in result && result.needsDeactivation) {
+        setDeactChoices(result.needsDeactivation)
+        return
+      }
       if ('error' in result) { setError(result.error ?? 'Failed'); return }
-      router.push(`/portal/classes/${result.classId}`)
+      if ('classId' in result) router.push(`/portal/classes/${result.classId}`)
     })
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    submit(null)
   }
 
   return (
@@ -104,6 +115,51 @@ export function NewClassForm() {
           Cancel
         </button>
       </div>
+
+      {/* Two-active-class limit dialog */}
+      {deactChoices && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDeactChoices(null)}>
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold text-amber-600">⚠ Two Classes Already Active</h3>
+            <p className="text-sm text-gray-600">
+              TPS runs two active classes at a time. To activate <strong>{name.toUpperCase()}</strong>,
+              choose which class to deactivate:
+            </p>
+            <div className="space-y-1.5">
+              {deactChoices.map(c => (
+                <label
+                  key={c.id}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer text-sm transition-colors ${
+                    deactPick === c.id ? 'border-tps-orange bg-tps-orange/5' : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="deact"
+                    checked={deactPick === c.id}
+                    onChange={() => setDeactPick(c.id)}
+                    className="text-tps-orange focus:ring-tps-orange"
+                  />
+                  Deactivate Class <strong>{c.name}</strong>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setDeactChoices(null)} className="btn-secondary flex-1 text-sm py-2">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDeactChoices(null); submit(deactPick) }}
+                disabled={!deactPick || pending}
+                className="btn-primary flex-1 text-sm py-2"
+              >
+                Deactivate &amp; Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   )
 }

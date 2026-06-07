@@ -5,16 +5,34 @@ import { requireAuth } from '@/lib/server-auth'
 import { can } from '@/lib/permissions'
 import { revalidatePath } from 'next/cache'
 import bcrypt from 'bcryptjs'
+import { provisionStudentCurriculum } from '@/lib/student-provisioning'
 import type { Track, Concentration } from '@prisma/client'
 
 // ── Create class ──────────────────────────────────────────────────────────────
 
+// TPS runs two active classes at a time. Activating a third requires
+// choosing which currently-active class to deactivate.
+async function checkActiveLimit(excludeClassId: string | null, deactivateClassId: string | null) {
+  const active = await db.class.findMany({
+    where:  { isActive: true, archivedAt: null, ...(excludeClassId ? { NOT: { id: excludeClassId } } : {}) },
+    select: { id: true, name: true },
+    orderBy: [{ isActive: 'desc' }, { name: 'desc' }],
+  })
+  if (active.length < 2) return { ok: true as const }
+  if (deactivateClassId && active.some(c => c.id === deactivateClassId)) {
+    await db.class.update({ where: { id: deactivateClassId }, data: { isActive: false } })
+    return { ok: true as const }
+  }
+  return { ok: false as const, activeClasses: active }
+}
+
 export async function createClassAction(data: {
-  name:          string
-  concentration: Concentration | null
-  startDate:     string | null  // YYYY-MM-DD
-  endDate:       string | null
-  isActive:      boolean
+  name:              string
+  concentration:     Concentration | null
+  startDate:         string | null  // YYYY-MM-DD
+  endDate:           string | null
+  isActive:          boolean
+  deactivateClassId?: string | null  // which active class to deactivate when at the 2-class limit
 }) {
   const user = await requireAuth()
   if (!can(user.role, 'manage:classes')) return { error: 'Insufficient permissions' }
@@ -25,9 +43,10 @@ export async function createClassAction(data: {
   const existing = await db.class.findUnique({ where: { name } })
   if (existing) return { error: `Class ${name} already exists.` }
 
-  // Only one active class at a time
+  // Two active classes max
   if (data.isActive) {
-    await db.class.updateMany({ where: { isActive: true }, data: { isActive: false } })
+    const limit = await checkActiveLimit(null, data.deactivateClassId ?? null)
+    if (!limit.ok) return { needsDeactivation: limit.activeClasses }
   }
 
   const cls = await db.class.create({
@@ -48,16 +67,18 @@ export async function createClassAction(data: {
 // ── Update class ──────────────────────────────────────────────────────────────
 
 export async function updateClassAction(classId: string, data: {
-  concentration: Concentration | null
-  startDate:     string | null
-  endDate:       string | null
-  isActive:      boolean
+  concentration:     Concentration | null
+  startDate:         string | null
+  endDate:           string | null
+  isActive:          boolean
+  deactivateClassId?: string | null
 }) {
   const user = await requireAuth()
   if (!can(user.role, 'manage:classes')) return { error: 'Insufficient permissions' }
 
   if (data.isActive) {
-    await db.class.updateMany({ where: { isActive: true, NOT: { id: classId } }, data: { isActive: false } })
+    const limit = await checkActiveLimit(classId, data.deactivateClassId ?? null)
+    if (!limit.ok) return { needsDeactivation: limit.activeClasses }
   }
 
   await db.class.update({
@@ -91,38 +112,6 @@ export async function archiveClassAction(classId: string) {
 }
 
 // ── Add student to class ──────────────────────────────────────────────────────
-
-/**
- * Provision a student's curriculum: a StudentSyllabusEvent row for every
- * active MCG event matching their track, plus gradebook entries for every
- * active gradesheet template matching their track.
- */
-async function provisionStudentCurriculum(studentId: string, track: Track) {
-  // Syllabus events (full MCG roadmap for their track)
-  const events = await db.syllabusEvent.findMany({
-    where:  { isActive: true, tracks: { has: track } },
-    select: { id: true },
-  })
-  if (events.length > 0) {
-    await db.studentSyllabusEvent.createMany({
-      data: events.map(e => ({ studentId, syllabusEventId: e.id, status: 'LOCKED' as const })),
-      skipDuplicates: true,
-    })
-  }
-
-  // Gradebook entries for matching templates
-  const templates = await db.gradesheetTemplate.findMany({
-    where:  { isActive: true, tracks: { has: track } },
-    select: { id: true },
-  })
-  for (const tmpl of templates) {
-    await db.gradebookEntry.upsert({
-      where:  { studentId_templateId: { studentId, templateId: tmpl.id } },
-      update: {},
-      create: { studentId, templateId: tmpl.id },
-    })
-  }
-}
 
 export async function addStudentAction(classId: string, data: {
   firstName:   string

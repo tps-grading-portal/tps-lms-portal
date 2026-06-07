@@ -76,14 +76,18 @@ export type ChannelSummary = {
   type:        ChatChannelType
   description: string | null
   trackFilter: Track | null
+  isPrivate:   boolean
+  canManage:   boolean   // admin or channel creator
   lastMessage: { content: string; authorName: string; sentAt: Date } | null
 }
 
 export async function getChannelsAction(classId: string): Promise<ChannelSummary[]> {
-  await requireAuth()
+  const user = await requireAuth()
+  const isAdmin = user.role === 'SYSTEM_ADMIN'
 
   const channels = await db.chatChannel.findMany({
-    where:   { classId, isArchived: false },
+    // Class channels + school-wide custom channels (classId null)
+    where:   { OR: [{ classId }, { classId: null }], isArchived: false },
     orderBy: [{ type: 'asc' }, { name: 'asc' }],
     include: {
       messages: {
@@ -92,26 +96,103 @@ export async function getChannelsAction(classId: string): Promise<ChannelSummary
         take:    1,
         include: { author: { select: { firstName: true, lastName: true } } },
       },
+      members: { select: { userId: true } },
     },
   })
 
-  return channels.map((ch) => {
-    const last = ch.messages[0]
-    return {
-      id:          ch.id,
-      name:        ch.name,
-      type:        ch.type,
-      description: ch.description,
-      trackFilter: ch.trackFilter,
-      lastMessage: last
-        ? {
-            content:    last.content,
-            authorName: `${last.author.firstName} ${last.author.lastName}`.trim(),
-            sentAt:     last.sentAt,
-          }
-        : null,
-    }
+  return channels
+    // Private channels: members only — admins always see everything
+    .filter(ch => !ch.isPrivate || isAdmin || ch.members.some(m => m.userId === user.id))
+    .map((ch) => {
+      const last = ch.messages[0]
+      return {
+        id:          ch.id,
+        name:        ch.name,
+        type:        ch.type,
+        description: ch.description,
+        trackFilter: ch.trackFilter,
+        isPrivate:   ch.isPrivate,
+        canManage:   isAdmin || ch.createdById === user.id,
+        lastMessage: last
+          ? {
+              content:    last.content,
+              authorName: `${last.author.firstName} ${last.author.lastName}`.trim(),
+              sentAt:     last.sentAt,
+            }
+          : null,
+      }
+    })
+}
+
+// ── Custom channels (public or private) ───────────────────────────────────────
+
+export async function createChannelAction(data: {
+  classId:       string | null   // null = school-wide
+  name:          string
+  description:   string | null
+  isPrivate:     boolean
+  memberUserIds: string[]        // additional members for private channels
+}) {
+  const user = await requireAuth()
+
+  let name = data.name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+  if (!name) return { error: 'Channel name is required.' }
+  if (!name.startsWith('#')) name = `#${name}`
+
+  const existing = await db.chatChannel.findFirst({
+    where: { name, classId: data.classId, isArchived: false },
   })
+  if (existing) return { error: `Channel ${name} already exists.` }
+
+  const channel = await db.chatChannel.create({
+    data: {
+      name,
+      description: data.description,
+      type:        'GENERAL',
+      classId:     data.classId,
+      isPrivate:   data.isPrivate,
+      createdById: user.id,
+    },
+  })
+
+  // Creator + selected members join (membership matters for private visibility)
+  const memberIds = [...new Set([user.id, ...data.memberUserIds])]
+  await db.chatChannelMember.createMany({
+    data: memberIds.map(userId => ({ channelId: channel.id, userId })),
+    skipDuplicates: true,
+  })
+
+  return { ok: true, channelId: channel.id }
+}
+
+export async function archiveChannelAction(channelId: string) {
+  const user = await requireAuth()
+
+  const channel = await db.chatChannel.findUnique({
+    where:  { id: channelId },
+    select: { createdById: true, isAutoProvisioned: true },
+  })
+  if (!channel) return { error: 'Channel not found.' }
+
+  // Admin has full authority over all channels; creators manage their own
+  const allowed = user.role === 'SYSTEM_ADMIN' || channel.createdById === user.id
+  if (!allowed) return { error: 'Only the channel creator or a system admin can archive this channel.' }
+  if (channel.isAutoProvisioned && user.role !== 'SYSTEM_ADMIN') {
+    return { error: 'Auto-provisioned channels can only be archived by a system admin.' }
+  }
+
+  await db.chatChannel.update({ where: { id: channelId }, data: { isArchived: true } })
+  return { ok: true }
+}
+
+export async function getChatMemberOptionsAction(): Promise<{ id: string; name: string; role: string }[]> {
+  await requireAuth()
+  const users = await db.user.findMany({
+    where:   { isActive: true },
+    orderBy: [{ role: 'asc' }, { lastName: 'asc' }],
+    select:  { id: true, firstName: true, lastName: true, role: true },
+  })
+  return users.map(u => ({ id: u.id, name: `${u.lastName}, ${u.firstName}`.trim(), role: u.role }))
 }
 
 // ── Send a message ────────────────────────────────────────────────────────────
@@ -162,26 +243,31 @@ export async function sendMessageAction(
 export async function uploadChatAttachmentAction(formData: FormData): Promise<
   { ok: true; attachment: ChatAttachment } | { ok: false; error: string }
 > {
-  await requireAuth()
+  try {
+    await requireAuth()
 
-  const file = formData.get('file') as File | null
-  if (!file || file.size === 0)      return { ok: false, error: 'No file provided.' }
-  if (file.size > 25 * 1024 * 1024)  return { ok: false, error: 'Attachment exceeds 25 MB limit.' }
+    const file = formData.get('file') as File | null
+    if (!file || file.size === 0)      return { ok: false, error: 'No file provided.' }
+    if (file.size > 25 * 1024 * 1024)  return { ok: false, error: 'Attachment exceeds 25 MB limit.' }
 
-  const { uploadFile } = await import('@/lib/storage')
-  const bytes = Buffer.from(await file.arrayBuffer())
-  const uploaded = await uploadFile(file.name, file.type || 'application/octet-stream', bytes, 'chat')
+    const { uploadFile } = await import('@/lib/storage')
+    const bytes = Buffer.from(await file.arrayBuffer())
+    const uploaded = await uploadFile(file.name, file.type || 'application/octet-stream', bytes, 'chat')
 
-  if (!uploaded.storageUrl) return { ok: false, error: 'Upload failed — no URL returned.' }
+    if (!uploaded.storageUrl) return { ok: false, error: 'Upload failed — no URL returned.' }
 
-  return {
-    ok: true,
-    attachment: {
-      name:      file.name,
-      url:       uploaded.storageUrl,
-      mimeType:  file.type || 'application/octet-stream',
-      sizeBytes: file.size,
-    },
+    return {
+      ok: true,
+      attachment: {
+        name:      file.name,
+        url:       uploaded.storageUrl,
+        mimeType:  file.type || 'application/octet-stream',
+        sizeBytes: file.size,
+      },
+    }
+  } catch (err) {
+    console.error('uploadChatAttachmentAction:', err)
+    return { ok: false, error: 'Attachment upload failed — file storage is unavailable.' }
   }
 }
 

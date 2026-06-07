@@ -1,23 +1,40 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { deptSortIndex, deptLabel } from '@/lib/mcg-departments'
-import type { RoadmapEvent } from './actions'
-import type { SyllabusEventStatus, DepartmentCode } from '@prisma/client'
+import { deptSortIndex, deptLabel, MCG_DEPT_ORDER } from '@/lib/mcg-departments'
+import { PrereqGraph } from './prereq-graph'
+import { createSyllabusEventAction, removeSyllabusEventAction } from './actions'
+import type { RoadmapEvent, RoadmapData } from './actions'
+import type { SyllabusEventStatus, DepartmentCode, Track, EventSuffix } from '@prisma/client'
 
-type Props = { events: RoadmapEvent[]; studentName: string | null }
+type Props = {
+  events:      RoadmapEvent[]
+  studentName: string | null
+  editScope:   RoadmapData['editScope']
+}
 
-const DEPT_LABELS: Record<DepartmentCode, string> = {
-  AN: 'Ancillary',
-  CF: 'Check Flights',
-  SO: 'Space Ops',
-  AS: 'Astro Sciences',
-  PF: 'Performance',
-  FQ: 'Flying Qualities',
-  SY: 'Mission Systems',
-  TF: 'Test Foundations',
-  TL: 'Test Leadership',
+// ── Concentration grouping (per MCG) ─────────────────────────────────────────
+// FTC: Pilot, CSO, RPA, FTE, ABM · STC: Operators · Common: both
+
+const FTC_TRACKS: Track[] = ['PILOT', 'RPA', 'FTE', 'CSO_WSO', 'ABM']
+
+type Concentration = 'FTC' | 'STC' | 'COMMON'
+
+const CONC_META: Record<Concentration, { label: string; sub: string }> = {
+  FTC:    { label: 'Flight Test Course (FTC)', sub: 'Pilot · CSO/WSO · RPA · FTE · ABM' },
+  STC:    { label: 'Space Test Course (STC)',  sub: 'Operators' },
+  COMMON: { label: 'Common Core',              sub: 'Shared FTC & STC curriculum' },
+}
+const CONC_ORDER: Concentration[] = ['COMMON', 'FTC', 'STC']
+
+function concentrationOf(tracks: Track[]): Concentration {
+  const hasFTC = tracks.some(t => FTC_TRACKS.includes(t))
+  const hasSTC = tracks.includes('OPERATOR')
+  if (hasFTC && hasSTC) return 'COMMON'
+  if (hasSTC) return 'STC'
+  return 'FTC'
 }
 
 const STATUS_META: Record<SyllabusEventStatus, { label: string; border: string; bg: string; dot: string }> = {
@@ -41,11 +58,15 @@ function scoreColor(score: number): string {
   return 'text-red-600 font-bold'
 }
 
-function EventNode({ event, expanded, onToggle, eventById }: {
-  event: RoadmapEvent
-  expanded: boolean
-  onToggle: () => void
+// ── Event card ────────────────────────────────────────────────────────────────
+
+function EventNode({ event, expanded, onToggle, eventById, canEdit, onRemove }: {
+  event:     RoadmapEvent
+  expanded:  boolean
+  onToggle:  () => void
   eventById: Map<string, RoadmapEvent>
+  canEdit:   boolean
+  onRemove:  () => void
 }) {
   const meta = getStatusMeta(event.status)
 
@@ -82,9 +103,8 @@ function EventNode({ event, expanded, onToggle, eventById }: {
           )}
         </div>
 
-        {/* Dept + credit hours */}
+        {/* Meta line */}
         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          <span className="text-[10px] text-gray-400">{DEPT_LABELS[event.deptCode]}</span>
           {event.creditHours > 0 && (
             <span className="text-[10px] text-gray-400">{event.creditHours} cr</span>
           )}
@@ -124,12 +144,23 @@ function EventNode({ event, expanded, onToggle, eventById }: {
               })}
             </div>
           )}
-          <Link
-            href={`/portal/lessons/${encodeURIComponent(event.courseCode)}`}
-            className="inline-block text-xs font-semibold text-tps-orange hover:underline"
-          >
-            Open lesson page →
-          </Link>
+          <div className="flex items-center justify-between gap-2">
+            <Link
+              href={`/portal/lessons/${encodeURIComponent(event.courseCode)}`}
+              className="inline-block text-xs font-semibold text-tps-orange hover:underline"
+            >
+              Open lesson page →
+            </Link>
+            {canEdit && (
+              <button
+                onClick={onRemove}
+                className="text-[10px] text-gray-300 hover:text-red-500 transition-colors"
+                title="Remove from syllabus"
+              >
+                Remove from syllabus
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -139,15 +170,7 @@ function EventNode({ event, expanded, onToggle, eventById }: {
 // ── Progress summary bar ──────────────────────────────────────────────────────
 
 function ProgressBar({ events }: { events: RoadmapEvent[] }) {
-  const counts = {
-    LOCKED:      0,
-    UPCOMING:    0,
-    IN_PROGRESS: 0,
-    COMPLETED:   0,
-    REVIEW:      0,
-    null:        0,
-  } as Record<string, number>
-
+  const counts = {} as Record<string, number>
   for (const e of events) {
     const key = e.status ?? 'null'
     counts[key] = (counts[key] ?? 0) + 1
@@ -164,7 +187,7 @@ function ProgressBar({ events }: { events: RoadmapEvent[] }) {
         <span className="text-gray-500">{done}/{total} completed ({pct}%)</span>
       </div>
       <div className="h-3 bg-gray-100 rounded-full overflow-hidden flex">
-        {done     > 0 && <div className="bg-green-500 h-full" style={{ width: `${(done/total)*100}%` }} />}
+        {done > 0 && <div className="bg-green-500 h-full" style={{ width: `${(done/total)*100}%` }} />}
         {(counts['IN_PROGRESS'] ?? 0) > 0 && <div className="bg-amber-400 h-full" style={{ width: `${((counts['IN_PROGRESS']??0)/total)*100}%` }} />}
         {(counts['UPCOMING']    ?? 0) > 0 && <div className="bg-blue-400 h-full"  style={{ width: `${((counts['UPCOMING']   ??0)/total)*100}%` }} />}
         {(counts['REVIEW']      ?? 0) > 0 && <div className="bg-red-400 h-full"   style={{ width: `${((counts['REVIEW']     ??0)/total)*100}%` }} />}
@@ -183,52 +206,167 @@ function ProgressBar({ events }: { events: RoadmapEvent[] }) {
   )
 }
 
+// ── Add course modal ──────────────────────────────────────────────────────────
+
+const SUFFIX_OPTIONS: { value: EventSuffix; label: string }[] = [
+  { value: 'A', label: 'A — Academic Lecture' }, { value: 'B', label: 'B — Async Content' },
+  { value: 'C', label: 'C — Control Room' },     { value: 'E', label: 'E — Exam' },
+  { value: 'F', label: 'F — Flight' },           { value: 'G', label: 'G — Ground School' },
+  { value: 'H', label: 'H — Ground Training' },  { value: 'I', label: 'I — Ground Test' },
+  { value: 'L', label: 'L — Lab' },              { value: 'M', label: 'M — MIB' },
+  { value: 'O', label: 'O — Space Operation' },  { value: 'R', label: 'R — Written Report' },
+  { value: 'S', label: 'S — Simulator' },        { value: 'W', label: 'W — Working Group' },
+  { value: 'Y', label: 'Y — Oral Report' },      { value: 'Z', label: 'Z — Debrief' },
+]
+
+const TRACK_OPTIONS: { value: Track; label: string }[] = [
+  { value: 'PILOT', label: 'Pilot' }, { value: 'CSO_WSO', label: 'CSO/WSO' }, { value: 'RPA', label: 'RPA' },
+  { value: 'FTE', label: 'FTE' }, { value: 'ABM', label: 'ABM' }, { value: 'OPERATOR', label: 'STC/Operator' },
+]
+
+function AddCourseModal({ editScope, onClose }: { editScope: Props['editScope']; onClose: () => void }) {
+  const router = useRouter()
+  const [pending, startTx]  = useTransition()
+  const [error,   setError] = useState<string | null>(null)
+
+  const allowedDepts = editScope.all ? [...MCG_DEPT_ORDER] : editScope.depts
+
+  const [courseCode, setCourseCode] = useState('')
+  const [title,      setTitle]      = useState('')
+  const [dept,       setDept]       = useState<string>(allowedDepts[0] ?? 'TF')
+  const [suffix,     setSuffix]     = useState<EventSuffix>('A')
+  const [tracks,     setTracks]     = useState<Track[]>([...FTC_TRACKS, 'OPERATOR'])
+  const [description, setDescription] = useState('')
+
+  function toggleTrack(t: Track) {
+    setTracks(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    const code = courseCode.trim().toUpperCase()
+    const numMatch = code.match(/(\d{4})/)
+    startTx(async () => {
+      const result = await createSyllabusEventAction({
+        courseCode:  code,
+        title,
+        deptCode:    dept as DepartmentCode,
+        eventSuffix: suffix,
+        phase:       numMatch ? parseInt(numMatch[1][0]) : 6,
+        tracks,
+        description: description || null,
+      })
+      if ('error' in result && result.error) { setError(result.error); return }
+      router.refresh()
+      onClose()
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-tps-navy">Add Course to Syllabus</h3>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="field-label">Course Code *</label>
+            <input
+              value={courseCode}
+              onChange={e => setCourseCode(e.target.value)}
+              className="field-input font-mono"
+              placeholder={`${dept} 6101${suffix}`}
+              disabled={pending}
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="field-label">Phase (Course) *</label>
+            <select value={dept} onChange={e => setDept(e.target.value)} className="field-input" disabled={pending}>
+              {allowedDepts.map(d => <option key={d} value={d}>{d} — {deptLabel(d)}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="field-label">Title *</label>
+          <input value={title} onChange={e => setTitle(e.target.value)} className="field-input" disabled={pending} />
+        </div>
+
+        <div>
+          <label className="field-label">Event Type *</label>
+          <select value={suffix} onChange={e => setSuffix(e.target.value as EventSuffix)} className="field-input" disabled={pending}>
+            {SUFFIX_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label className="field-label">Tracks *</label>
+          <div className="grid grid-cols-3 gap-1.5">
+            {TRACK_OPTIONS.map(t => (
+              <label
+                key={t.value}
+                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer text-sm transition-colors ${
+                  tracks.includes(t.value) ? 'border-tps-orange bg-tps-orange/5' : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={tracks.includes(t.value)}
+                  onChange={() => toggleTrack(t.value)}
+                  className="rounded border-gray-300 text-tps-orange focus:ring-tps-orange"
+                  disabled={pending}
+                />
+                {t.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="field-label">Description</label>
+          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className="field-input" disabled={pending} />
+        </div>
+
+        {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+        <button type="submit" disabled={pending || !courseCode.trim() || !title.trim()} className="btn-primary w-full text-sm py-2.5">
+          {pending ? 'Adding…' : 'Add Course'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const ALL_STATUSES: (SyllabusEventStatus | 'all')[] = ['all', 'LOCKED', 'UPCOMING', 'IN_PROGRESS', 'COMPLETED', 'REVIEW']
 
-/**
- * Topological "flow levels": level 0 = no prerequisites; level n = one step
- * after its deepest prerequisite. Visualizes the syllabus dependency flow.
- */
-function computeFlowLevels(events: RoadmapEvent[]): Map<string, number> {
-  const byId = new Map(events.map(e => [e.id, e]))
-  const levels = new Map<string, number>()
-
-  function levelOf(id: string, stack: Set<string>): number {
-    const cached = levels.get(id)
-    if (cached !== undefined) return cached
-    if (stack.has(id)) return 0 // defensive: break cycles
-    const event = byId.get(id)
-    if (!event) return 0
-    stack.add(id)
-    const prereqLevels = event.prerequisiteIds
-      .filter(pid => byId.has(pid))
-      .map(pid => levelOf(pid, stack))
-    stack.delete(id)
-    const level = prereqLevels.length === 0 ? 0 : Math.max(...prereqLevels) + 1
-    levels.set(id, level)
-    return level
-  }
-
-  for (const e of events) levelOf(e.id, new Set())
-  return levels
-}
-
-export function RoadmapView({ events, studentName }: Props) {
+export function RoadmapView({ events, studentName, editScope }: Props) {
+  const router = useRouter()
   const [filterStatus, setFilterStatus] = useState<SyllabusEventStatus | 'all'>('all')
   const [filterDept,   setFilterDept]   = useState<DepartmentCode | 'all'>('all')
   const [expandedId,   setExpandedId]   = useState<string | null>(null)
   const [search,       setSearch]       = useState('')
   const [flowMode,     setFlowMode]     = useState(false)
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set())
+  const [addOpen,      setAddOpen]      = useState(false)
+  const [, startTx] = useTransition()
 
   const eventById = useMemo(() => new Map(events.map(e => [e.id, e])), [events])
+
+  const canEditAny = editScope.all || editScope.depts.length > 0
+  const canEditDept = (dept: DepartmentCode) => editScope.all || editScope.depts.includes(dept)
 
   // Departments present, in MCG curriculum order
   const depts = useMemo(
     () => [...new Set(events.map(e => e.deptCode))].sort((a, b) => deptSortIndex(a) - deptSortIndex(b)),
     [events],
   )
+
   const filtered = useMemo(() => {
     let list = events
     if (filterStatus !== 'all') list = list.filter(e => e.status === filterStatus)
@@ -240,37 +378,43 @@ export function RoadmapView({ events, studentName }: Props) {
     return list
   }, [events, filterStatus, filterDept, search])
 
-  // Group filtered events by MCG department (course), in MCG order
-  const byDept = useMemo(() => {
-    const map = new Map<DepartmentCode, RoadmapEvent[]>()
+  // Concentration → dept → events
+  const grouped = useMemo(() => {
+    const result = new Map<Concentration, Map<DepartmentCode, RoadmapEvent[]>>()
     for (const e of filtered) {
-      if (!map.has(e.deptCode)) map.set(e.deptCode, [])
-      map.get(e.deptCode)!.push(e)
+      const conc = concentrationOf(e.tracks)
+      if (!result.has(conc)) result.set(conc, new Map())
+      const deptMap = result.get(conc)!
+      if (!deptMap.has(e.deptCode)) deptMap.set(e.deptCode, [])
+      deptMap.get(e.deptCode)!.push(e)
     }
-    for (const list of map.values()) {
-      list.sort((a, b) => a.courseCode.localeCompare(b.courseCode, undefined, { numeric: true }))
+    for (const deptMap of result.values()) {
+      for (const list of deptMap.values()) {
+        list.sort((a, b) => a.courseCode.localeCompare(b.courseCode, undefined, { numeric: true }))
+      }
     }
-    return new Map([...map.entries()].sort((a, b) => deptSortIndex(a[0]) - deptSortIndex(b[0])))
+    return result
   }, [filtered])
 
-  // Flow mode: group by prerequisite depth instead
-  const byFlowLevel = useMemo(() => {
-    if (!flowMode) return new Map<number, RoadmapEvent[]>()
-    const levels = computeFlowLevels(events)
-    const map = new Map<number, RoadmapEvent[]>()
-    for (const e of filtered) {
-      const lvl = levels.get(e.id) ?? 0
-      if (!map.has(lvl)) map.set(lvl, [])
-      map.get(lvl)!.push(e)
-    }
-    for (const list of map.values()) {
-      list.sort((a, b) =>
-        deptSortIndex(a.deptCode) - deptSortIndex(b.deptCode) ||
-        a.courseCode.localeCompare(b.courseCode, undefined, { numeric: true }),
-      )
-    }
-    return new Map([...map.entries()].sort((a, b) => a[0] - b[0]))
-  }, [flowMode, events, filtered])
+  // Auto-expand sections when filtering/searching
+  const forceOpen = search.trim().length > 0 || filterStatus !== 'all' || filterDept !== 'all'
+
+  function toggleSection(key: string) {
+    setOpenSections(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) { next.delete(key) } else { next.add(key) }
+      return next
+    })
+  }
+
+  function handleRemove(event: RoadmapEvent) {
+    if (!confirm(`Remove ${event.courseCode} — ${event.title} from the syllabus? It can be re-added later.`)) return
+    startTx(async () => {
+      const result = await removeSyllabusEventAction(event.id)
+      if ('error' in result && result.error) { alert(result.error); return }
+      router.refresh()
+    })
+  }
 
   const hasStudentData = events.some(e => e.status !== null)
 
@@ -297,18 +441,19 @@ export function RoadmapView({ events, studentName }: Props) {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <input
-          type="search"
-          placeholder="Search events…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="field-input flex-1"
-        />
+      {/* Search — full-width row */}
+      <input
+        type="search"
+        placeholder="Search by course code or title…"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="field-input w-full"
+      />
 
-        {/* View mode toggle */}
-        <div className="flex rounded-lg border border-gray-200 overflow-hidden self-start">
+      {/* Controls row */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* View mode */}
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
           <button
             onClick={() => setFlowMode(false)}
             className={`px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -323,32 +468,29 @@ export function RoadmapView({ events, studentName }: Props) {
               flowMode ? 'bg-tps-navy text-white' : 'bg-white text-gray-600 hover:text-tps-navy'
             }`}
           >
-            Prerequisite Flow
+            Prerequisite Web
           </button>
         </div>
 
-        <div className="flex gap-1 flex-wrap">
-          {(['all', ...depts] as (DepartmentCode | 'all')[]).map(d => (
-            <button
-              key={d}
-              onClick={() => setFilterDept(d)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                filterDept === d
-                  ? 'bg-tps-navy text-white'
-                  : 'bg-white border border-gray-200 text-gray-600 hover:border-tps-orange hover:text-tps-orange'
-              }`}
-            >
-              {d === 'all' ? 'All Courses' : d}
-            </button>
-          ))}
-        </div>
+        <div className="h-5 w-px bg-gray-200" />
 
+        {/* Dept filter */}
+        <select
+          value={filterDept}
+          onChange={e => setFilterDept(e.target.value as DepartmentCode | 'all')}
+          className="field-input w-auto text-xs py-1.5"
+        >
+          <option value="all">All Courses</option>
+          {depts.map(d => <option key={d} value={d}>{d} — {deptLabel(d)}</option>)}
+        </select>
+
+        {/* Status chips */}
         <div className="flex gap-1 flex-wrap">
           {ALL_STATUSES.map(s => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 filterStatus === s
                   ? 'bg-tps-navy text-white'
                   : 'bg-white border border-gray-200 text-gray-600 hover:border-tps-orange hover:text-tps-orange'
@@ -358,72 +500,88 @@ export function RoadmapView({ events, studentName }: Props) {
             </button>
           ))}
         </div>
+
+        {/* Add course — scoped */}
+        {canEditAny && (
+          <button onClick={() => setAddOpen(true)} className="btn-primary text-xs px-3 py-1.5 ml-auto">
+            + Add Course
+          </button>
+        )}
       </div>
 
       {/* Results count */}
       <p className="text-xs text-gray-400">{filtered.length} event{filtered.length !== 1 ? 's' : ''} shown</p>
 
-      {/* Course (department) sections — MCG order */}
-      {!flowMode && (byDept.size === 0 ? (
+      {/* ── Prerequisite web (spiderweb graph) ── */}
+      {flowMode && <PrereqGraph events={filtered} />}
+
+      {/* ── By-course view: FTC / STC / Common, collapsible courses ── */}
+      {!flowMode && (filtered.length === 0 ? (
         <div className="card text-center py-10 text-gray-400">No events match your filters.</div>
       ) : (
-        Array.from(byDept.entries()).map(([dept, deptEvents]) => (
-          <section key={dept}>
-            {/* Course header */}
-            <div className="flex items-center gap-3 mb-3">
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs font-bold text-tps-navy uppercase tracking-wider px-2">
-                {dept} — {deptLabel(dept)}
-              </span>
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs text-gray-400">{deptEvents.length} events</span>
-            </div>
+        CONC_ORDER.map(conc => {
+          const deptMap = grouped.get(conc)
+          if (!deptMap || deptMap.size === 0) return null
+          const concTotal = [...deptMap.values()].reduce((n, l) => n + l.length, 0)
+          const sortedDepts = [...deptMap.entries()].sort((a, b) => deptSortIndex(a[0]) - deptSortIndex(b[0]))
 
-            {/* Event grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {deptEvents.map(event => (
-                <EventNode
-                  key={event.id}
-                  event={event}
-                  expanded={expandedId === event.id}
-                  onToggle={() => setExpandedId(expandedId === event.id ? null : event.id)}
-                  eventById={eventById}
-                />
-              ))}
-            </div>
-          </section>
-        ))
+          return (
+            <section key={conc} className="space-y-3">
+              {/* Concentration banner */}
+              <div className="rounded-xl bg-tps-navy text-white px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <p className="font-bold text-sm">{CONC_META[conc].label}</p>
+                  <p className="text-xs text-white/60">{CONC_META[conc].sub}</p>
+                </div>
+                <span className="text-xs text-white/70">{concTotal} events</span>
+              </div>
+
+              {/* Collapsible course (dept) sections */}
+              {sortedDepts.map(([dept, deptEvents]) => {
+                const key = `${conc}:${dept}`
+                const open = forceOpen || openSections.has(key)
+                const completed = deptEvents.filter(e => e.status === 'COMPLETED').length
+                return (
+                  <div key={key} className="card p-0 overflow-hidden">
+                    <button
+                      onClick={() => toggleSection(key)}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50/70 transition-colors"
+                    >
+                      <span className={`text-gray-400 text-sm transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+                      <span className="text-xs font-bold font-mono text-tps-navy w-8">{dept}</span>
+                      <span className="text-sm font-semibold text-gray-700 flex-1">{deptLabel(dept)}</span>
+                      {hasStudentData && (
+                        <span className={`text-xs tabular-nums ${completed === deptEvents.length ? 'text-green-600 font-semibold' : 'text-gray-400'}`}>
+                          {completed}/{deptEvents.length} complete
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-400">{deptEvents.length} events</span>
+                    </button>
+
+                    {open && (
+                      <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {deptEvents.map(event => (
+                          <EventNode
+                            key={event.id}
+                            event={event}
+                            expanded={expandedId === event.id}
+                            onToggle={() => setExpandedId(expandedId === event.id ? null : event.id)}
+                            eventById={eventById}
+                            canEdit={canEditDept(event.deptCode)}
+                            onRemove={() => handleRemove(event)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </section>
+          )
+        })
       ))}
 
-      {/* Prerequisite flow — events ordered by dependency depth */}
-      {flowMode && (byFlowLevel.size === 0 ? (
-        <div className="card text-center py-10 text-gray-400">No events match your filters.</div>
-      ) : (
-        Array.from(byFlowLevel.entries()).map(([level, levelEvents]) => (
-          <section key={level}>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs font-bold text-tps-navy uppercase tracking-wider px-2">
-                {level === 0 ? 'Start — No Prerequisites' : `Flow Step ${level}`}
-              </span>
-              <div className="h-px flex-1 bg-gray-200" />
-              <span className="text-xs text-gray-400">{levelEvents.length} events</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {levelEvents.map(event => (
-                <EventNode
-                  key={event.id}
-                  event={event}
-                  expanded={expandedId === event.id}
-                  onToggle={() => setExpandedId(expandedId === event.id ? null : event.id)}
-                  eventById={eventById}
-                />
-              ))}
-            </div>
-          </section>
-        ))
-      ))}
+      {addOpen && <AddCourseModal editScope={editScope} onClose={() => setAddOpen(false)} />}
     </div>
   )
 }

@@ -436,6 +436,7 @@ model SyllabusEvent {
   isGraded      Boolean        @default(false)
   isActive      Boolean        @default(true)
   sortOrder     Int            @default(0)
+  defaultDurationMinutes Int?  // typical course length — pre-fills the scheduler
 
   // Which tracks must complete this event
   tracks        Track[]
@@ -474,11 +475,13 @@ model SyllabusEventPrerequisite {
   @@map("syllabus_event_prerequisites")
 }
 
-// When a specific class has a specific event scheduled
+// When a specific class has a specific event scheduled. A course can be
+// spread over multiple days — one row per session.
 model ClassSyllabusSchedule {
   id              String    @id @default(cuid())
   classId         String
   syllabusEventId String
+  sessionNumber   Int       @default(1)  // day 1, day 2, … of a multi-day course
   academicWeekId  String?   // FK → AcademicWeek
   instructorId    String?   // FK → User (who is teaching this event)
   scheduledDate   DateTime?
@@ -493,7 +496,7 @@ model ClassSyllabusSchedule {
   academicWeek  AcademicWeek? @relation(fields: [academicWeekId],  references: [id], onDelete: SetNull)
   instructor    User?         @relation("ScheduleInstructor", fields: [instructorId], references: [id], onDelete: SetNull)
 
-  @@unique([classId, syllabusEventId])
+  @@unique([classId, syllabusEventId, sessionNumber])
   @@map("class_syllabus_schedules")
 }
 
@@ -730,6 +733,8 @@ model ChatChannel {
   courseCode       String?         // for COURSE channels
   deptCode         DepartmentCode? // for DEPARTMENT channels
   isAutoProvisioned Boolean        @default(false)
+  isPrivate        Boolean         @default(false) // member-only visibility (admins always see)
+  createdById      String?         // custom channel creator
   isArchived       Boolean         @default(false)
   createdAt        DateTime        @default(now())
 

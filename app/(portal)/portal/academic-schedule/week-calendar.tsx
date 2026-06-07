@@ -11,7 +11,14 @@ const SLOT_MIN      = 30
 const SLOT_PX       = 26
 const ROWS          = (DAY_END_MIN - DAY_START_MIN) / SLOT_MIN
 
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+const DAY_LABELS_5 = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+const DAY_LABELS_7 = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+// Visual distinction between the two active classes
+const CLASS_COLORS = [
+  { block: 'bg-blue-100 border-blue-500 text-blue-900',   chip: 'bg-blue-600 text-white' },
+  { block: 'bg-amber-100 border-amber-500 text-amber-900', chip: 'bg-amber-500 text-white' },
+]
 
 function toMinutes(hhmm: string): number {
   const [h, m] = hhmm.split(':').map(Number)
@@ -24,23 +31,11 @@ function toHHMM(mins: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
-/** ISO date (YYYY-MM-DD) for day index 0-4 of a week starting at startDate */
+/** ISO date (YYYY-MM-DD) for day index of a week starting at startDate (Monday) */
 function dayISO(weekStartISO: string, dayIdx: number): string {
   const d = new Date(`${weekStartISO.slice(0, 10)}T12:00:00Z`)
   d.setUTCDate(d.getUTCDate() + dayIdx)
   return d.toISOString().slice(0, 10)
-}
-
-const DEPT_BLOCK_COLORS: Record<string, string> = {
-  AN: 'bg-gray-200 border-gray-400 text-gray-800',
-  CF: 'bg-cyan-100 border-cyan-400 text-cyan-900',
-  SO: 'bg-purple-100 border-purple-400 text-purple-900',
-  AS: 'bg-indigo-100 border-indigo-400 text-indigo-900',
-  PF: 'bg-blue-100 border-blue-400 text-blue-900',
-  FQ: 'bg-sky-100 border-sky-400 text-sky-900',
-  SY: 'bg-emerald-100 border-emerald-400 text-emerald-900',
-  TF: 'bg-amber-100 border-amber-400 text-amber-900',
-  TL: 'bg-rose-100 border-rose-400 text-rose-900',
 }
 
 type DragState =
@@ -48,29 +43,41 @@ type DragState =
   | { kind: 'resize'; scheduleId: string; dayIdx: number; startMin: number; durationMin: number }
 
 type ConflictPrompt = {
-  conflicts:   ScheduleConflict[]
-  retry:       () => void
+  conflicts: ScheduleConflict[]
+  retry:     () => void
 }
 
 export function WeekCalendar({
-  week, canEdit, onSlotClick, onEventClick,
+  week, events, showTwoClasses, days, canEdit, onSlotClick, onEventClick, onExternalDrop,
 }: {
-  week:         WeekRow
-  canEdit:      boolean
-  onSlotClick:  (dateISO: string, time: string) => void
-  onEventClick: (e: ScheduledEventRow) => void
+  week:           WeekRow              // defines the date range + labels
+  events:         ScheduledEventRow[]  // merged events of all visible classes, any class
+  showTwoClasses: boolean
+  days:           5 | 7                // weekend toggle
+  canEdit:        boolean
+  onSlotClick:    (dateISO: string, time: string) => void
+  onEventClick:   (e: ScheduledEventRow) => void
+  onExternalDrop: (syllabusEventId: string, dateISO: string, time: string) => void
 }) {
   const router = useRouter()
   const gridRef = useRef<HTMLDivElement>(null)
   const [drag,     setDrag]     = useState<DragState | null>(null)
   const [conflict, setConflict] = useState<ConflictPrompt | null>(null)
   const [saving,   setSaving]   = useState(false)
+  const [dropHint, setDropHint] = useState<{ dayIdx: number; startMin: number } | null>(null)
 
-  // Events that have a concrete date+time within this week
-  const placed = week.events.filter(e => e.scheduledDate && e.scheduledTime)
+  const DAY_LABELS = days === 7 ? DAY_LABELS_7 : DAY_LABELS_5
+
+  // Events with a concrete date+time within this week's range
+  const weekStart = week.startDate.slice(0, 10)
+  const placed = events.filter(e => {
+    if (!e.scheduledDate || !e.scheduledTime) return false
+    const iso = e.scheduledDate.slice(0, 10)
+    return iso >= weekStart && iso <= dayISO(weekStart, days - 1)
+  })
 
   const eventsForDay = (dayIdx: number) => {
-    const iso = dayISO(week.startDate, dayIdx)
+    const iso = dayISO(weekStart, dayIdx)
     return placed.filter(e => e.scheduledDate!.slice(0, 10) === iso)
   }
 
@@ -82,21 +89,20 @@ export function WeekCalendar({
     const rect = grid.getBoundingClientRect()
     const x = clientX - rect.left
     const y = clientY - rect.top
-    const colW = rect.width / 5
-    const dayIdx = Math.max(0, Math.min(4, Math.floor(x / colW)))
+    const colW = rect.width / days
+    const dayIdx = Math.max(0, Math.min(days - 1, Math.floor(x / colW)))
     const slot   = Math.max(0, Math.min(ROWS - 1, Math.floor(y / SLOT_PX)))
     return { dayIdx, startMin: DAY_START_MIN + slot * SLOT_MIN }
-  }, [])
+  }, [days])
 
   async function commitMove(scheduleId: string, dayIdx: number, startMin: number, durationMin: number, override = false) {
     setSaving(true)
-    const payload = {
-      scheduledDate:   dayISO(week.startDate, dayIdx),
+    const result = await moveScheduledEventAction(scheduleId, {
+      scheduledDate:   dayISO(weekStart, dayIdx),
       scheduledTime:   toHHMM(startMin),
       durationMinutes: durationMin,
       override,
-    }
-    const result = await moveScheduledEventAction(scheduleId, payload)
+    })
     setSaving(false)
     if ('conflicts' in result && result.conflicts) {
       setConflict({
@@ -115,7 +121,6 @@ export function WeekCalendar({
     if (drag.kind === 'move') {
       setDrag({ ...drag, dayIdx: pos.dayIdx, startMin: pos.startMin })
     } else {
-      // Resize: duration from block start to pointer, min one slot
       const newDur = Math.max(SLOT_MIN, pos.startMin + SLOT_MIN - drag.startMin)
       setDrag({ ...drag, durationMin: newDur })
     }
@@ -128,6 +133,26 @@ export function WeekCalendar({
     commitMove(d.scheduleId, d.dayIdx, d.startMin, d.durationMin)
   }
 
+  // ── HTML5 drop target (events dragged in from the side panel) ───────────────
+
+  function handleDragOver(e: React.DragEvent) {
+    if (!canEdit) return
+    e.preventDefault()
+    const pos = posFromPointer(e.clientX, e.clientY)
+    setDropHint(pos)
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    if (!canEdit) return
+    e.preventDefault()
+    setDropHint(null)
+    const eventId = e.dataTransfer.getData('application/x-tps-event')
+    if (!eventId) return
+    const pos = posFromPointer(e.clientX, e.clientY)
+    if (!pos) return
+    onExternalDrop(eventId, dayISO(weekStart, pos.dayIdx), toHHMM(pos.startMin))
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
 
   const timeLabels = []
@@ -137,14 +162,15 @@ export function WeekCalendar({
 
   return (
     <div className="card p-0 overflow-x-auto select-none">
-      <div className="min-w-[640px]">
+      <div style={{ minWidth: days === 7 ? 800 : 640 }}>
         {/* Day headers */}
-        <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: '56px repeat(5, 1fr)' }}>
+        <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: `56px repeat(${days}, 1fr)` }}>
           <div />
           {DAY_LABELS.map((label, i) => {
-            const iso = dayISO(week.startDate, i)
+            const iso = dayISO(weekStart, i)
+            const isWeekend = i >= 5
             return (
-              <div key={label} className="px-2 py-2 text-center border-l border-gray-100">
+              <div key={label} className={`px-2 py-2 text-center border-l border-gray-100 ${isWeekend ? 'bg-gray-50' : ''}`}>
                 <p className="text-xs font-bold text-tps-navy">{label}</p>
                 <p className="text-[10px] text-gray-400">
                   {new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -155,7 +181,7 @@ export function WeekCalendar({
         </div>
 
         {/* Body: time gutter + grid */}
-        <div className="grid" style={{ gridTemplateColumns: '56px repeat(5, 1fr)' }}>
+        <div className="grid" style={{ gridTemplateColumns: `56px repeat(${days}, 1fr)` }}>
           {/* Time gutter */}
           <div className="relative" style={{ height: ROWS * SLOT_PX }}>
             {timeLabels.map((t, i) => (
@@ -169,18 +195,21 @@ export function WeekCalendar({
             ))}
           </div>
 
-          {/* 5-day grid */}
+          {/* Day grid */}
           <div
             ref={gridRef}
-            className="relative col-span-5 grid grid-cols-5"
-            style={{ height: ROWS * SLOT_PX }}
+            className="relative grid"
+            style={{ height: ROWS * SLOT_PX, gridColumn: `span ${days}`, gridTemplateColumns: `repeat(${days}, 1fr)` }}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerLeave={() => drag && handlePointerUp()}
+            onDragOver={handleDragOver}
+            onDragLeave={() => setDropHint(null)}
+            onDrop={handleDrop}
           >
             {/* Background slots */}
-            {Array.from({ length: 5 }).map((_, dayIdx) => (
-              <div key={dayIdx} className="relative border-l border-gray-100">
+            {Array.from({ length: days }).map((_, dayIdx) => (
+              <div key={dayIdx} className={`relative border-l border-gray-100 ${dayIdx >= 5 ? 'bg-gray-50/60' : ''}`}>
                 {Array.from({ length: ROWS }).map((_, row) => (
                   <div
                     key={row}
@@ -190,7 +219,7 @@ export function WeekCalendar({
                     style={{ height: SLOT_PX }}
                     onClick={() => {
                       if (!canEdit || drag) return
-                      onSlotClick(dayISO(week.startDate, dayIdx), toHHMM(DAY_START_MIN + row * SLOT_MIN))
+                      onSlotClick(dayISO(weekStart, dayIdx), toHHMM(DAY_START_MIN + row * SLOT_MIN))
                     }}
                   />
                 ))}
@@ -205,12 +234,12 @@ export function WeekCalendar({
 
                   const top    = ((startMin - DAY_START_MIN) / SLOT_MIN) * SLOT_PX
                   const height = Math.max(SLOT_PX, (durMin / SLOT_MIN) * SLOT_PX)
-                  const colors = DEPT_BLOCK_COLORS[e.deptCode] ?? 'bg-gray-100 border-gray-300 text-gray-800'
+                  const colors = CLASS_COLORS[e.classColorIdx % CLASS_COLORS.length]
 
                   return (
                     <div
                       key={e.scheduleId}
-                      className={`absolute left-0.5 right-0.5 rounded-md border-l-4 px-1.5 py-1 overflow-hidden text-left transition-shadow ${colors} ${
+                      className={`absolute left-0.5 right-0.5 rounded-md border-l-4 px-1.5 py-1 overflow-hidden text-left transition-shadow ${colors.block} ${
                         isDragging ? 'shadow-lg opacity-90 z-20' : 'z-10 hover:shadow-md'
                       } ${canEdit ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${!e.isConfirmed ? 'border-dashed' : ''}`}
                       style={{ top, height }}
@@ -231,7 +260,14 @@ export function WeekCalendar({
                         if (!drag) onEventClick(e)
                       }}
                     >
-                      <p className="text-[10px] font-bold font-mono leading-tight truncate">{e.courseCode}</p>
+                      <div className="flex items-center gap-1">
+                        {showTwoClasses && (
+                          <span className={`text-[8px] font-bold px-1 rounded ${colors.chip}`}>{e.className}</span>
+                        )}
+                        <p className="text-[10px] font-bold font-mono leading-tight truncate">
+                          {e.courseCode}{e.sessionCount > 1 ? ` (${e.sessionNumber}/${e.sessionCount})` : ''}
+                        </p>
+                      </div>
                       {height >= SLOT_PX * 1.5 && (
                         <p className="text-[10px] leading-tight truncate opacity-80">{e.title}</p>
                       )}
@@ -265,15 +301,28 @@ export function WeekCalendar({
               </div>
             ))}
 
-            {/* Drag ghost when moving across days */}
+            {/* Internal drag ghost */}
             {drag?.kind === 'move' && (
               <div
                 className="absolute rounded-md border-2 border-dashed border-tps-orange bg-tps-orange/10 z-30 pointer-events-none"
                 style={{
-                  left:   `calc(${drag.dayIdx * 20}% + 2px)`,
-                  width:  'calc(20% - 4px)',
+                  left:   `calc(${(drag.dayIdx / days) * 100}% + 2px)`,
+                  width:  `calc(${100 / days}% - 4px)`,
                   top:    ((drag.startMin - DAY_START_MIN) / SLOT_MIN) * SLOT_PX,
                   height: Math.max(SLOT_PX, (drag.durationMin / SLOT_MIN) * SLOT_PX),
+                }}
+              />
+            )}
+
+            {/* External drop hint */}
+            {dropHint && (
+              <div
+                className="absolute rounded-md border-2 border-dashed border-green-500 bg-green-100/40 z-30 pointer-events-none"
+                style={{
+                  left:   `calc(${(dropHint.dayIdx / days) * 100}% + 2px)`,
+                  width:  `calc(${100 / days}% - 4px)`,
+                  top:    ((dropHint.startMin - DAY_START_MIN) / SLOT_MIN) * SLOT_PX,
+                  height: 2 * SLOT_PX,
                 }}
               />
             )}
@@ -283,26 +332,6 @@ export function WeekCalendar({
 
       {saving && (
         <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">Saving…</div>
-      )}
-
-      {/* Events in this week without a time yet */}
-      {week.events.filter(e => !e.scheduledDate || !e.scheduledTime).length > 0 && (
-        <div className="border-t border-gray-100 px-4 py-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">
-            In this week, not yet on the calendar — click a time slot to place, or click to edit
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {week.events.filter(e => !e.scheduledDate || !e.scheduledTime).map(e => (
-              <button
-                key={e.scheduleId}
-                onClick={() => onEventClick(e)}
-                className="text-xs px-2 py-1 rounded-lg border border-gray-200 hover:border-tps-orange font-mono font-bold text-tps-navy"
-              >
-                {e.courseCode}
-              </button>
-            ))}
-          </div>
-        </div>
       )}
 
       {/* Conflict override dialog */}
@@ -335,8 +364,8 @@ export function WeekCalendar({
 
       {canEdit && (
         <p className="px-4 py-2 text-[10px] text-gray-400 border-t border-gray-100">
-          Click an empty slot to schedule · drag a block to move it · drag the bottom
-          edge to change duration · overlaps warn with an override option
+          Drag a course from the panel onto the grid · click an empty slot to schedule ·
+          drag blocks to move · drag the bottom edge to resize · overlaps warn with an override
         </p>
       )}
     </div>

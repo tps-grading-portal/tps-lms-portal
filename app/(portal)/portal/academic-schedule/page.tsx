@@ -32,13 +32,14 @@ export default async function AcademicSchedulePage({
     <div className="max-w-4xl mx-auto">
       <ScheduleView
         classes={data.classes}
+        activeClasses={data.activeClasses}
         selectedClassId={data.selectedClassId}
         selectedClassName={data.selectedClassName ?? ''}
         classStartDate={data.classStartDate}
         classEndDate={data.classEndDate}
         weeks={data.weeks}
-        unscheduled={data.unscheduled}
-        catalog={data.catalog}
+        scheduled={data.scheduled}
+        unscheduledByClass={data.unscheduledByClass}
         instructors={data.instructors}
         canEdit={data.canEdit}
       />

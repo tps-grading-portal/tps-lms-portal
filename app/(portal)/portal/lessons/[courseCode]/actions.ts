@@ -188,6 +188,7 @@ export async function deleteLessonAction(syllabusEventId: string, lessonId: stri
 // see VAULT-approved files.
 
 export async function uploadCourseContentAction(formData: FormData) {
+  try {
   const user = await requireAuth()
   if (!can(user.role, 'submit:content')) return { error: 'Insufficient permissions to submit content.' }
 
@@ -254,6 +255,10 @@ export async function uploadCourseContentAction(formData: FormData) {
   revalidatePath(`/portal/lessons/${event.courseCode}`)
   revalidatePath('/portal/vault')
   return { ok: true }
+  } catch (err) {
+    console.error('uploadCourseContentAction:', err)
+    return { error: 'Upload failed — file storage is unavailable. Contact the system admin if this persists.' }
+  }
 }
 
 // ── Prerequisite editing (scoped to content authority) ───────────────────────

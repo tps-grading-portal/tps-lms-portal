@@ -1,14 +1,14 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useMemo, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { deptSortIndex, deptLabel } from '@/lib/mcg-departments'
 import { WeekCalendar } from './week-calendar'
 import {
   createWeekAction, updateWeekAction, deleteWeekAction,
-  scheduleEventAction, unscheduleEventAction, toggleConfirmAction,
-  generateWeeksAction,
+  scheduleEventAction, unscheduleAllSessionsAction, toggleConfirmAction,
+  saveEventSessionsAction, setDefaultDurationAction, generateWeeksAction,
   type WeekRow, type ScheduledEventRow, type CatalogEvent, type InstructorOption,
   type ScheduleConflict,
 } from './actions'
@@ -39,64 +39,105 @@ const DEPT_COLORS: Record<string, string> = {
   TL: 'bg-rose-100 text-rose-700',
 }
 
-// ── Event scheduling form (modal) ────────────────────────────────────────────
+const CLASS_TOGGLE_COLORS = ['bg-blue-600 text-white', 'bg-amber-500 text-white']
 
-type EventFormState = {
-  syllabusEventId: string
-  courseCode:      string
-  title:           string
-  scheduleId:      string | null   // null = scheduling from catalog
-  academicWeekId:  string | null
-  instructorId:    string | null
-  scheduledDate:   string
-  scheduledTime:   string
-  durationMinutes: string
-  locationRoom:    string
-}
+// ── Sessions modal (multi-day course editor) ─────────────────────────────────
 
-function EventFormModal({
-  state, weeks, instructors, classId, onClose,
+type SessionRow = { date: string; time: string; duration: string }
+
+function SessionsModal({
+  classId, className, event, existingSessions, instructors, prefill, onClose,
 }: {
-  state:       EventFormState
-  weeks:       WeekRow[]
-  instructors: InstructorOption[]
-  classId:     string
-  onClose:     () => void
+  classId:          string
+  className:        string
+  event:            { id: string; courseCode: string; title: string; defaultDuration: number | null }
+  existingSessions: ScheduledEventRow[]   // current sessions for this class+event
+  instructors:      InstructorOption[]
+  prefill:          { date: string; time: string } | null
+  onClose:          () => void
 }) {
   const router = useRouter()
-  const [pending, startTx] = useTransition()
+  const [pending, startTx]  = useTransition()
   const [error,   setError] = useState<string | null>(null)
   const [conflicts, setConflicts] = useState<ScheduleConflict[] | null>(null)
-  const [form,    setForm]  = useState(state)
 
-  function set<K extends keyof EventFormState>(key: K, val: EventFormState[K]) {
-    setForm(prev => ({ ...prev, [key]: val }))
+  const first = existingSessions[0] ?? null
+  const [instructorId, setInstructorId] = useState<string>(first?.instructorId ?? '')
+  const [locationRoom, setLocationRoom] = useState<string>(first?.locationRoom ?? '')
+  const [defaultDur,   setDefaultDur]   = useState<string>(event.defaultDuration?.toString() ?? '')
+
+  const initialSessions: SessionRow[] =
+    existingSessions.length > 0
+      ? existingSessions
+          .filter(s => s.scheduledDate && s.scheduledTime)
+          .sort((a, b) => a.sessionNumber - b.sessionNumber)
+          .map(s => ({
+            date:     toInputDate(s.scheduledDate),
+            time:     s.scheduledTime ?? '',
+            duration: (s.durationMinutes ?? 60).toString(),
+          }))
+      : [{
+          date:     prefill?.date ?? '',
+          time:     prefill?.time ?? '08:00',
+          duration: (event.defaultDuration ?? 60).toString(),
+        }]
+
+  const [sessions, setSessions] = useState<SessionRow[]>(
+    initialSessions.length > 0 ? initialSessions : [{ date: '', time: '08:00', duration: '60' }],
+  )
+
+  function setSession(i: number, patch: Partial<SessionRow>) {
+    setSessions(prev => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s))
     setConflicts(null)
+  }
+
+  function addDay() {
+    const last = sessions[sessions.length - 1]
+    // Default the new day to the day after the previous session
+    let nextDate = ''
+    if (last?.date) {
+      const d = new Date(`${last.date}T12:00:00Z`)
+      d.setUTCDate(d.getUTCDate() + 1)
+      nextDate = d.toISOString().slice(0, 10)
+    }
+    setSessions(prev => [...prev, { date: nextDate, time: last?.time ?? '08:00', duration: last?.duration ?? '60' }])
+  }
+
+  function removeDay(i: number) {
+    setSessions(prev => prev.filter((_, idx) => idx !== i))
   }
 
   function handleSave(override = false) {
     setError(null)
+    const parsed = sessions
+      .filter(s => s.date && s.time)
+      .map(s => ({ date: s.date, time: s.time, durationMinutes: parseInt(s.duration) || 60 }))
+    if (parsed.length === 0) { setError('At least one session with a date and time is required.'); return }
+
     startTx(async () => {
-      const result = await scheduleEventAction(classId, form.syllabusEventId, {
-        academicWeekId:  form.academicWeekId || null,
-        instructorId:    form.instructorId || null,
-        scheduledDate:   form.scheduledDate || null,
-        scheduledTime:   form.scheduledTime || null,
-        durationMinutes: form.durationMinutes ? parseInt(form.durationMinutes) : null,
-        locationRoom:    form.locationRoom || null,
+      // Persist default course length if changed
+      const newDefault = defaultDur ? parseInt(defaultDur) : null
+      if (newDefault !== event.defaultDuration) {
+        await setDefaultDurationAction(event.id, newDefault)
+      }
+
+      const result = await saveEventSessionsAction(
+        classId, event.id,
+        { instructorId: instructorId || null, locationRoom: locationRoom || null },
+        parsed,
         override,
-      })
+      )
       if ('conflicts' in result && result.conflicts) { setConflicts(result.conflicts); return }
-      if ('error' in result) { setError(result.error ?? 'Failed'); return }
+      if ('error' in result && result.error) { setError(result.error); return }
       router.refresh()
       onClose()
     })
   }
 
-  function handleRemove() {
-    if (!form.scheduleId) return
+  function handleRemoveAll() {
+    if (!confirm(`Remove ${event.courseCode} from the ${className} schedule entirely?`)) return
     startTx(async () => {
-      await unscheduleEventAction(form.scheduleId!)
+      await unscheduleAllSessionsAction(classId, event.id)
       router.refresh()
       onClose()
     })
@@ -104,104 +145,202 @@ function EventFormModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-start justify-between mb-4">
+      <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
           <div>
-            <p className="text-xs font-mono font-bold text-tps-navy">{form.courseCode}</p>
-            <h3 className="font-bold text-tps-navy">{form.title}</h3>
+            <p className="text-xs font-mono font-bold text-tps-navy">{event.courseCode} · Class {className}</p>
+            <h3 className="font-bold text-tps-navy">{event.title}</h3>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
         </div>
 
-        <div className="space-y-4">
-          {/* Week */}
-          <div>
-            <label className="field-label">Academic Week</label>
-            <select
-              value={form.academicWeekId ?? ''}
-              onChange={e => set('academicWeekId', e.target.value || null)}
-              className="field-input"
-              disabled={pending}
-            >
-              <option value="">— Unassigned —</option>
-              {weeks.map(w => (
-                <option key={w.id} value={w.id}>Week {w.weekNumber} · {w.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Instructor */}
+        {/* Instructor + room */}
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="field-label">Instructor</label>
-            <select
-              value={form.instructorId ?? ''}
-              onChange={e => set('instructorId', e.target.value || null)}
-              className="field-input"
-              disabled={pending}
-            >
+            <select value={instructorId} onChange={e => setInstructorId(e.target.value)} className="field-input" disabled={pending}>
               <option value="">— Not assigned —</option>
-              {instructors.map(i => (
-                <option key={i.id} value={i.id}>{i.name}</option>
-              ))}
+              {instructors.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
           </div>
-
-          {/* Date + time */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="field-label">Date</label>
-              <input type="date" value={form.scheduledDate} onChange={e => set('scheduledDate', e.target.value)} className="field-input" disabled={pending} />
-            </div>
-            <div>
-              <label className="field-label">Time</label>
-              <input type="time" value={form.scheduledTime} onChange={e => set('scheduledTime', e.target.value)} className="field-input" disabled={pending} />
-            </div>
+          <div>
+            <label className="field-label">Room / Location</label>
+            <input value={locationRoom} onChange={e => setLocationRoom(e.target.value)} className="field-input" placeholder="Bldg 1864 Rm 107" disabled={pending} />
           </div>
+        </div>
 
-          {/* Duration + room */}
+        {/* Default course length */}
+        <div>
+          <label className="field-label">Course Length (default, minutes)</label>
+          <input
+            type="number" min={0} step={30}
+            value={defaultDur}
+            onChange={e => setDefaultDur(e.target.value)}
+            className="field-input w-32"
+            disabled={pending}
+          />
+          <p className="text-xs text-gray-400 mt-1">Saved on the course — pre-fills future scheduling for any class.</p>
+        </div>
+
+        {/* Sessions — spread the course over multiple days */}
+        <div className="space-y-2">
+          <label className="field-label">Sessions {sessions.length > 1 && `(${sessions.length} days)`}</label>
+          {sessions.map((s, i) => (
+            <div key={i} className="flex gap-2 items-center flex-wrap">
+              <span className="text-[10px] font-bold text-gray-400 w-10">Day {i + 1}</span>
+              <input type="date" value={s.date} onChange={e => setSession(i, { date: e.target.value })} className="field-input w-36 text-sm" disabled={pending} />
+              <input type="time" value={s.time} onChange={e => setSession(i, { time: e.target.value })} className="field-input w-26 text-sm" disabled={pending} />
+              <div className="flex items-center gap-1">
+                <input type="number" min={30} step={30} value={s.duration} onChange={e => setSession(i, { duration: e.target.value })} className="field-input w-20 text-sm" disabled={pending} />
+                <span className="text-xs text-gray-400">min</span>
+              </div>
+              {sessions.length > 1 && (
+                <button onClick={() => removeDay(i)} className="text-gray-300 hover:text-red-500 text-lg leading-none" disabled={pending}>×</button>
+              )}
+            </div>
+          ))}
+          <button onClick={addDay} className="text-xs text-tps-blue hover:underline" disabled={pending}>
+            + Add Day — spread this course over another day
+          </button>
+        </div>
+
+        {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+        {/* Conflicts + override */}
+        {conflicts && (
+          <div className="rounded-lg bg-amber-50 border border-amber-300 px-3 py-3 space-y-2">
+            <p className="text-sm font-semibold text-amber-800">
+              ⚠ Overlaps {conflicts.length === 1 ? 'another event' : `${conflicts.length} other events`} for this class:
+            </p>
+            <ul className="space-y-1">
+              {conflicts.map((c, i) => (
+                <li key={i} className="text-xs text-amber-800">
+                  <span className="font-mono font-bold">{c.courseCode}</span> {c.title} · {c.time}
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={() => handleSave(true)}
+              disabled={pending}
+              className="w-full text-sm py-2 rounded-lg font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+            >
+              {pending ? 'Saving…' : 'Schedule Anyway (Override)'}
+            </button>
+          </div>
+        )}
+
+        <div className="flex gap-3 pt-1">
+          <button onClick={() => handleSave(false)} disabled={pending} className="btn-primary flex-1 text-sm py-2.5">
+            {pending ? 'Saving…' : `Save ${sessions.length > 1 ? `${sessions.length} Sessions` : 'Schedule'}`}
+          </button>
+          {existingSessions.length > 0 && (
+            <button onClick={handleRemoveAll} disabled={pending} className="text-sm text-red-500 hover:text-red-700 px-3">
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Week form (create/edit) ───────────────────────────────────────────────────
+
+type WeekFormState = {
+  weekId:     string | null
+  weekNumber: string
+  label:      string
+  theme:      string
+  startDate:  string
+  endDate:    string
+}
+
+function WeekFormModal({ state, classId, onClose }: { state: WeekFormState; classId: string; onClose: () => void }) {
+  const router = useRouter()
+  const [pending, startTx] = useTransition()
+  const [error,   setError] = useState<string | null>(null)
+  const [form,    setForm]  = useState(state)
+
+  function set<K extends keyof WeekFormState>(key: K, val: WeekFormState[K]) {
+    setForm(prev => ({ ...prev, [key]: val }))
+  }
+
+  function handleSave() {
+    setError(null)
+    if (!form.label.trim() || !form.startDate || !form.endDate) {
+      setError('Label, start date, and end date are required.')
+      return
+    }
+    startTx(async () => {
+      const result = form.weekId
+        ? await updateWeekAction(form.weekId, {
+            label: form.label, theme: form.theme || null,
+            startDate: form.startDate, endDate: form.endDate,
+          })
+        : await createWeekAction(classId, {
+            weekNumber: parseInt(form.weekNumber) || 0,
+            label: form.label, theme: form.theme || null,
+            startDate: form.startDate, endDate: form.endDate,
+          })
+      if ('error' in result && result.error) { setError(result.error); return }
+      router.refresh()
+      onClose()
+    })
+  }
+
+  function handleDelete() {
+    if (!form.weekId) return
+    if (!confirm('Delete this week? Scheduled events will become unassigned (not deleted).')) return
+    startTx(async () => {
+      await deleteWeekAction(form.weekId!)
+      router.refresh()
+      onClose()
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-tps-navy">{form.weekId ? 'Edit Week' : 'Add Week'}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+
+        <div className="space-y-4">
+          {!form.weekId && (
+            <div>
+              <label className="field-label">Week Number</label>
+              <input type="number" min={0} value={form.weekNumber} onChange={e => set('weekNumber', e.target.value)} className="field-input" disabled={pending} />
+            </div>
+          )}
+          <div>
+            <label className="field-label">Label *</label>
+            <input type="text" value={form.label} onChange={e => set('label', e.target.value)} className="field-input" placeholder="e.g. Week 4" disabled={pending} />
+          </div>
+          <div>
+            <label className="field-label">Theme</label>
+            <input type="text" value={form.theme} onChange={e => set('theme', e.target.value)} className="field-input" placeholder="e.g. Performance Flight Testing" disabled={pending} />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="field-label">Duration (min)</label>
-              <input type="number" min={0} value={form.durationMinutes} onChange={e => set('durationMinutes', e.target.value)} className="field-input" disabled={pending} />
+              <label className="field-label">Start Date *</label>
+              <input type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} className="field-input" disabled={pending} />
             </div>
             <div>
-              <label className="field-label">Room / Location</label>
-              <input type="text" value={form.locationRoom} onChange={e => set('locationRoom', e.target.value)} className="field-input" placeholder="e.g. Bldg 1864 Rm 107" disabled={pending} />
+              <label className="field-label">End Date *</label>
+              <input type="date" value={form.endDate} onChange={e => set('endDate', e.target.value)} className="field-input" disabled={pending} />
             </div>
           </div>
 
           {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
 
-          {/* Conflict warning + override */}
-          {conflicts && (
-            <div className="rounded-lg bg-amber-50 border border-amber-300 px-3 py-3 space-y-2">
-              <p className="text-sm font-semibold text-amber-800">
-                ⚠ This time overlaps {conflicts.length === 1 ? 'another event' : `${conflicts.length} other events`} for this class:
-              </p>
-              <ul className="space-y-1">
-                {conflicts.map((c, i) => (
-                  <li key={i} className="text-xs text-amber-800">
-                    <span className="font-mono font-bold">{c.courseCode}</span> {c.title} · {c.time}
-                  </li>
-                ))}
-              </ul>
-              <button
-                onClick={() => handleSave(true)}
-                disabled={pending}
-                className="w-full text-sm py-2 rounded-lg font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
-              >
-                {pending ? 'Saving…' : 'Schedule Anyway (Override)'}
-              </button>
-            </div>
-          )}
-
           <div className="flex gap-3 pt-2">
-            <button onClick={() => handleSave(false)} disabled={pending} className="btn-primary flex-1 text-sm py-2.5">
-              {pending ? 'Saving…' : 'Save'}
+            <button onClick={handleSave} disabled={pending} className="btn-primary flex-1 text-sm py-2.5">
+              {pending ? 'Saving…' : 'Save Week'}
             </button>
-            {form.scheduleId && (
-              <button onClick={handleRemove} disabled={pending} className="text-sm text-red-500 hover:text-red-700 px-3">
-                Remove
+            {form.weekId && (
+              <button onClick={handleDelete} disabled={pending} className="text-sm text-red-500 hover:text-red-700 px-3">
+                Delete
               </button>
             )}
           </div>
@@ -266,185 +405,110 @@ function GenerateWeeksPanel({
   )
 }
 
-// ── Week form (create/edit) ───────────────────────────────────────────────────
+// ── Unscheduled events side panel ─────────────────────────────────────────────
 
-type WeekFormState = {
-  weekId:     string | null
-  weekNumber: string
-  label:      string
-  theme:      string
-  startDate:  string
-  endDate:    string
-}
-
-function WeekFormModal({ state, classId, onClose }: { state: WeekFormState; classId: string; onClose: () => void }) {
-  const router = useRouter()
-  const [pending, startTx] = useTransition()
-  const [error,   setError] = useState<string | null>(null)
-  const [form,    setForm]  = useState(state)
-
-  function set<K extends keyof WeekFormState>(key: K, val: WeekFormState[K]) {
-    setForm(prev => ({ ...prev, [key]: val }))
-  }
-
-  function handleSave() {
-    setError(null)
-    if (!form.label.trim() || !form.startDate || !form.endDate) {
-      setError('Label, start date, and end date are required.')
-      return
-    }
-    startTx(async () => {
-      const result = form.weekId
-        ? await updateWeekAction(form.weekId, {
-            label: form.label, theme: form.theme || null,
-            startDate: form.startDate, endDate: form.endDate,
-          })
-        : await createWeekAction(classId, {
-            weekNumber: parseInt(form.weekNumber) || 1,
-            label: form.label, theme: form.theme || null,
-            startDate: form.startDate, endDate: form.endDate,
-          })
-      if ('error' in result) { setError(result.error ?? 'Failed'); return }
-      router.refresh()
-      onClose()
-    })
-  }
-
-  function handleDelete() {
-    if (!form.weekId) return
-    if (!confirm('Delete this week? Scheduled events will become unassigned (not deleted).')) return
-    startTx(async () => {
-      await deleteWeekAction(form.weekId!)
-      router.refresh()
-      onClose()
-    })
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold text-tps-navy">{form.weekId ? 'Edit Week' : 'Add Week'}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
-        </div>
-
-        <div className="space-y-4">
-          {!form.weekId && (
-            <div>
-              <label className="field-label">Week Number</label>
-              <input type="number" min={1} value={form.weekNumber} onChange={e => set('weekNumber', e.target.value)} className="field-input" disabled={pending} />
-            </div>
-          )}
-          <div>
-            <label className="field-label">Label *</label>
-            <input type="text" value={form.label} onChange={e => set('label', e.target.value)} className="field-input" placeholder="e.g. Phase 6 — Week 2" disabled={pending} />
-          </div>
-          <div>
-            <label className="field-label">Theme</label>
-            <input type="text" value={form.theme} onChange={e => set('theme', e.target.value)} className="field-input" placeholder="e.g. Performance Flight Testing" disabled={pending} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="field-label">Start Date *</label>
-              <input type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} className="field-input" disabled={pending} />
-            </div>
-            <div>
-              <label className="field-label">End Date *</label>
-              <input type="date" value={form.endDate} onChange={e => set('endDate', e.target.value)} className="field-input" disabled={pending} />
-            </div>
-          </div>
-
-          {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
-
-          <div className="flex gap-3 pt-2">
-            <button onClick={handleSave} disabled={pending} className="btn-primary flex-1 text-sm py-2.5">
-              {pending ? 'Saving…' : 'Save Week'}
-            </button>
-            {form.weekId && (
-              <button onClick={handleDelete} disabled={pending} className="text-sm text-red-500 hover:text-red-700 px-3">
-                Delete
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Catalog picker (add event to schedule) ───────────────────────────────────
-
-function CatalogPicker({
-  catalog, onPick, onClose,
+function UnscheduledPanel({
+  activeClasses, panelClassId, onPanelClassChange, events, selectedEventId, onSelect, canEdit,
 }: {
-  catalog: CatalogEvent[]
-  onPick:  (e: CatalogEvent) => void
-  onClose: () => void
+  activeClasses:      { id: string; name: string; colorIdx: number }[]
+  panelClassId:       string
+  onPanelClassChange: (id: string) => void
+  events:             CatalogEvent[]
+  selectedEventId:    string | null
+  onSelect:           (e: CatalogEvent | null) => void
+  canEdit:            boolean
 }) {
   const [search, setSearch] = useState('')
   const [dept,   setDept]   = useState<string | 'all'>('all')
 
-  const filtered = catalog.filter(e => {
+  const depts = [...new Set(events.map(e => e.deptCode))].sort((a, b) => deptSortIndex(a) - deptSortIndex(b))
+
+  const filtered = events.filter(e => {
     if (dept !== 'all' && e.deptCode !== dept) return false
     if (search && !e.courseCode.toLowerCase().includes(search.toLowerCase()) &&
         !e.title.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
 
-  const depts = [...new Set(catalog.map(e => e.deptCode))]
-    .sort((a, b) => deptSortIndex(a) - deptSortIndex(b))
-
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold text-tps-navy">Add Event to Schedule</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
-        </div>
-
-        <div className="flex gap-2 mb-3 flex-wrap">
-          <input
-            type="search"
-            placeholder="Search course code or title…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="field-input flex-1 min-w-[180px]"
-          />
-          <select
-            value={dept}
-            onChange={e => setDept(e.target.value)}
-            className="field-input w-auto"
-          >
-            <option value="all">All Courses</option>
-            {depts.map(d => <option key={d} value={d}>{d} — {deptLabel(d)}</option>)}
-          </select>
-        </div>
-
-        <div className="overflow-y-auto flex-1 space-y-1.5">
-          {filtered.length === 0 ? (
-            <p className="text-center text-gray-400 text-sm py-8">No unscheduled events match.</p>
-          ) : filtered.map(e => (
+    <aside className="w-full lg:w-72 shrink-0 card p-0 flex flex-col" style={{ maxHeight: '75vh' }}>
+      {/* Class toggle — dictates the drop target */}
+      <div className="p-3 border-b border-gray-100 space-y-2">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+          Needs Scheduling — for class:
+        </p>
+        <div className="flex gap-1">
+          {activeClasses.map(c => (
             <button
-              key={e.id}
-              onClick={() => onPick(e)}
-              className="w-full text-left card py-2.5 hover:border-tps-orange transition-colors flex items-center gap-3"
+              key={c.id}
+              onClick={() => onPanelClassChange(c.id)}
+              className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                panelClassId === c.id
+                  ? CLASS_TOGGLE_COLORS[c.colorIdx % CLASS_TOGGLE_COLORS.length]
+                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              }`}
             >
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${DEPT_COLORS[e.deptCode] ?? 'bg-gray-100 text-gray-600'}`}>
-                {e.deptCode}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-mono font-bold text-tps-navy">{e.courseCode}</p>
-                <p className="text-sm text-gray-700 truncate">{e.title}</p>
-              </div>
+              {c.name}
             </button>
           ))}
         </div>
+
+        <input
+          type="search"
+          placeholder="Search…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="field-input text-sm"
+        />
+        <select value={dept} onChange={e => setDept(e.target.value)} className="field-input text-xs w-full">
+          <option value="all">All Courses</option>
+          {depts.map(d => <option key={d} value={d}>{d} — {deptLabel(d)}</option>)}
+        </select>
       </div>
-    </div>
+
+      {/* Draggable event list */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        {filtered.length === 0 ? (
+          <p className="text-center text-gray-400 text-xs py-6">Everything is scheduled. 🎉</p>
+        ) : filtered.map(e => (
+          <div
+            key={e.id}
+            draggable={canEdit}
+            onDragStart={ev => {
+              ev.dataTransfer.setData('application/x-tps-event', e.id)
+              ev.dataTransfer.effectAllowed = 'copy'
+            }}
+            onClick={() => canEdit && onSelect(selectedEventId === e.id ? null : e)}
+            className={`px-2.5 py-2 rounded-lg border text-left transition-colors ${
+              canEdit ? 'cursor-grab active:cursor-grabbing' : ''
+            } ${
+              selectedEventId === e.id
+                ? 'border-tps-orange bg-tps-orange/5'
+                : 'border-gray-100 hover:border-gray-300 bg-white'
+            }`}
+          >
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${DEPT_COLORS[e.deptCode] ?? 'bg-gray-100 text-gray-600'}`}>
+                {e.deptCode}
+              </span>
+              <span className="text-xs font-mono font-bold text-tps-navy truncate">{e.courseCode}</span>
+              {e.defaultDuration && (
+                <span className="text-[9px] text-gray-400 ml-auto shrink-0">{e.defaultDuration}m</span>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-600 truncate mt-0.5">{e.title}</p>
+          </div>
+        ))}
+      </div>
+
+      <p className="px-3 py-2 border-t border-gray-100 text-[10px] text-gray-400">
+        {filtered.length} unscheduled · drag onto the calendar, or click to select then click a slot
+      </p>
+    </aside>
   )
 }
 
-// ── Event row card ────────────────────────────────────────────────────────────
+// ── Event card (list view) ────────────────────────────────────────────────────
 
 function EventCard({
   event, canEdit, onEdit, onToggleConfirm,
@@ -466,7 +530,7 @@ function EventCard({
             href={`/portal/lessons/${encodeURIComponent(event.courseCode)}`}
             className="text-xs font-mono font-bold text-tps-navy hover:text-tps-orange transition-colors"
           >
-            {event.courseCode}
+            {event.courseCode}{event.sessionCount > 1 ? ` (day ${event.sessionNumber}/${event.sessionCount})` : ''}
           </Link>
           {event.isGraded && (
             <span className="text-[10px] font-semibold bg-tps-orange/10 text-tps-orange px-1.5 py-0.5 rounded">Graded</span>
@@ -517,13 +581,14 @@ function EventCard({
 
 type Props = {
   classes:           { id: string; name: string; isActive: boolean }[]
+  activeClasses:     { id: string; name: string; colorIdx: number }[]
   selectedClassId:   string
   selectedClassName: string
   classStartDate:    string | null
   classEndDate:      string | null
   weeks:             WeekRow[]
-  unscheduled:       ScheduledEventRow[]
-  catalog:           CatalogEvent[]
+  scheduled:         ScheduledEventRow[]   // all sessions, all visible classes
+  unscheduledByClass: Record<string, CatalogEvent[]>
   instructors:       InstructorOption[]
   canEdit:           boolean
 }
@@ -534,55 +599,79 @@ function defaultWeekIndex(weeks: WeekRow[]): number {
   return idx >= 0 ? idx : 0
 }
 
+type SessionsModalState = {
+  classId:   string
+  className: string
+  event:     { id: string; courseCode: string; title: string; defaultDuration: number | null }
+  prefill:   { date: string; time: string } | null
+}
+
 export function ScheduleView({
-  classes, selectedClassId, selectedClassName, classStartDate, classEndDate,
-  weeks, unscheduled, catalog, instructors, canEdit,
+  classes, activeClasses, selectedClassId, selectedClassName, classStartDate, classEndDate,
+  weeks, scheduled, unscheduledByClass, instructors, canEdit,
 }: Props) {
   const router = useRouter()
-  const [eventForm,  setEventForm]  = useState<EventFormState | null>(null)
-  const [weekForm,   setWeekForm]   = useState<WeekFormState | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [viewMode,   setViewMode]   = useState<'calendar' | 'list'>('calendar')
-  const [weekIdx,    setWeekIdx]    = useState(() => defaultWeekIndex(weeks))
-  const [slotPick,   setSlotPick]   = useState<{ date: string; time: string } | null>(null)
+  const [weekForm,      setWeekForm]      = useState<WeekFormState | null>(null)
+  const [viewMode,      setViewMode]      = useState<'calendar' | 'list'>('calendar')
+  const [weekIdx,       setWeekIdx]       = useState(() => defaultWeekIndex(weeks))
+  const [showWeekend,   setShowWeekend]   = useState(false)
+  const [panelClassId,  setPanelClassId]  = useState(selectedClassId)
+  const [selectedEvent, setSelectedEvent] = useState<CatalogEvent | null>(null)
+  const [sessionsModal, setSessionsModal] = useState<SessionsModalState | null>(null)
+  const [dropConflicts, setDropConflicts] = useState<{ conflicts: ScheduleConflict[]; retry: () => void } | null>(null)
+  const [, startTx] = useTransition()
 
   const activeWeek = weeks[Math.min(weekIdx, Math.max(0, weeks.length - 1))] ?? null
+  const panelClass = activeClasses.find(c => c.id === panelClassId) ?? activeClasses[0]
+  const panelEvents = unscheduledByClass[panelClass?.id ?? ''] ?? []
 
-  function openEventEdit(e: ScheduledEventRow) {
-    setEventForm({
-      syllabusEventId: e.syllabusEventId,
-      courseCode:      e.courseCode,
-      title:           e.title,
-      scheduleId:      e.scheduleId,
-      academicWeekId:  e.academicWeekId,
-      instructorId:    e.instructorId,
-      scheduledDate:   toInputDate(e.scheduledDate),
-      scheduledTime:   e.scheduledTime ?? '',
-      durationMinutes: e.durationMinutes?.toString() ?? '',
-      locationRoom:    e.locationRoom ?? '',
-    })
-  }
+  const classNameById = useMemo(() => new Map(classes.map(c => [c.id, c.name])), [classes])
 
-  function openCatalogPick(e: CatalogEvent) {
-    setPickerOpen(false)
-    setEventForm({
-      syllabusEventId: e.id,
-      courseCode:      e.courseCode,
-      title:           e.title,
-      scheduleId:      null,
-      academicWeekId:  slotPick && activeWeek ? activeWeek.id : null,
-      instructorId:    null,
-      scheduledDate:   slotPick?.date ?? '',
-      scheduledTime:   slotPick?.time ?? '',
-      durationMinutes: slotPick ? '60' : '',
-      locationRoom:    '',
+  // ── Scheduling flows ────────────────────────────────────────────────────────
+
+  function scheduleAt(eventId: string, dateISO: string, time: string, override = false) {
+    const targetClass = panelClass?.id ?? selectedClassId
+    const catalogEvent = (unscheduledByClass[targetClass] ?? []).find(e => e.id === eventId)
+    startTx(async () => {
+      const result = await scheduleEventAction(targetClass, eventId, {
+        academicWeekId:  null,
+        instructorId:    null,
+        scheduledDate:   dateISO,
+        scheduledTime:   time,
+        durationMinutes: catalogEvent?.defaultDuration ?? 60,
+        locationRoom:    null,
+        override,
+      })
+      if ('conflicts' in result && result.conflicts) {
+        setDropConflicts({
+          conflicts: result.conflicts,
+          retry: () => { setDropConflicts(null); scheduleAt(eventId, dateISO, time, true) },
+        })
+        return
+      }
+      setSelectedEvent(null)
+      router.refresh()
     })
-    setSlotPick(null)
   }
 
   function handleSlotClick(dateISO: string, time: string) {
-    setSlotPick({ date: dateISO, time })
-    setPickerOpen(true)
+    if (selectedEvent) {
+      scheduleAt(selectedEvent.id, dateISO, time)
+    }
+  }
+
+  function openSessionsForScheduled(e: ScheduledEventRow) {
+    setSessionsModal({
+      classId:   e.classId,
+      className: classNameById.get(e.classId) ?? '',
+      event: {
+        id:              e.syllabusEventId,
+        courseCode:      e.courseCode,
+        title:           e.title,
+        defaultDuration: e.durationMinutes,
+      },
+      prefill: null,
+    })
   }
 
   async function handleToggleConfirm(scheduleId: string) {
@@ -590,29 +679,48 @@ export function ScheduleView({
     router.refresh()
   }
 
-  const totalScheduled = weeks.reduce((n, w) => n + w.events.length, 0) + unscheduled.length
+  // Sessions for the modal's class+event
+  const modalSessions = sessionsModal
+    ? scheduled.filter(s => s.classId === sessionsModal.classId && s.syllabusEventId === sessionsModal.event.id)
+    : []
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header controls */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">Academic Schedule</h1>
           <p className="text-gray-500 text-sm">
-            Class {selectedClassName} · {totalScheduled} scheduled event{totalScheduled === 1 ? '' : 's'} · {weeks.length} week{weeks.length === 1 ? '' : 's'}
+            {activeClasses.length > 1
+              ? `Classes ${activeClasses.map(c => c.name).join(' + ')} on the calendar`
+              : `Class ${selectedClassName}`}
+            {' '}· {weeks.length} week{weeks.length === 1 ? '' : 's'}
           </p>
         </div>
 
         <div className="flex gap-2 flex-wrap items-center">
-          {classes.length > 1 && (
-            <select
-              value={selectedClassId}
-              onChange={e => router.push(`/portal/academic-schedule?classId=${e.target.value}`)}
-              className="field-input w-auto text-sm"
-            >
-              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+          {/* Legend for the two classes */}
+          {activeClasses.length > 1 && (
+            <div className="flex gap-2 items-center mr-1">
+              {activeClasses.map(c => (
+                <span key={c.id} className="flex items-center gap-1 text-xs text-gray-500">
+                  <span className={`w-3 h-3 rounded ${c.colorIdx === 0 ? 'bg-blue-400' : 'bg-amber-400'}`} />
+                  {c.name}
+                </span>
+              ))}
+            </div>
           )}
+
+          {/* Weekend toggle */}
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showWeekend}
+              onChange={e => setShowWeekend(e.target.checked)}
+              className="rounded border-gray-300 text-tps-orange focus:ring-tps-orange"
+            />
+            Weekend
+          </label>
 
           {/* View toggle */}
           {weeks.length > 0 && (
@@ -632,21 +740,16 @@ export function ScheduleView({
           )}
 
           {canEdit && (
-            <>
-              <button
-                onClick={() => setWeekForm({
-                  weekId: null,
-                  weekNumber: (Math.max(-1, ...weeks.map(w => w.weekNumber)) + 1).toString(),
-                  label: '', theme: '', startDate: '', endDate: '',
-                })}
-                className="btn-secondary text-sm px-3 py-2"
-              >
-                + Week
-              </button>
-              <button onClick={() => { setSlotPick(null); setPickerOpen(true) }} className="btn-primary text-sm px-3 py-2">
-                + Schedule Event
-              </button>
-            </>
+            <button
+              onClick={() => setWeekForm({
+                weekId: null,
+                weekNumber: (Math.max(-1, ...weeks.map(w => w.weekNumber)) + 1).toString(),
+                label: '', theme: '', startDate: '', endDate: '',
+              })}
+              className="btn-secondary text-sm px-3 py-2"
+            >
+              + Week
+            </button>
           )}
         </div>
       </div>
@@ -665,63 +768,88 @@ export function ScheduleView({
         </div>
       )}
 
-      {/* ── Calendar view ── */}
+      {/* ── Calendar + side panel ── */}
       {viewMode === 'calendar' && activeWeek && (
-        <div className="space-y-3">
-          {/* Week navigation */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
-              disabled={weekIdx === 0}
-              className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
-            >
-              ← Prev
-            </button>
-            <select
-              value={activeWeek.id}
-              onChange={e => setWeekIdx(weeks.findIndex(w => w.id === e.target.value))}
-              className="field-input w-auto text-sm font-medium"
-            >
-              {weeks.map(w => (
-                <option key={w.id} value={w.id}>
-                  Week {w.weekNumber} · {fmtRange(w.startDate, w.endDate)}{w.theme ? ` · ${w.theme}` : ''}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
-              disabled={weekIdx >= weeks.length - 1}
-              className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
-            >
-              Next →
-            </button>
-            {canEdit && (
+        <div className="flex flex-col lg:flex-row gap-4 items-start">
+          <div className="flex-1 min-w-0 space-y-3 w-full">
+            {/* Week navigation */}
+            <div className="flex items-center gap-2 flex-wrap">
               <button
-                onClick={() => setWeekForm({
-                  weekId: activeWeek.id,
-                  weekNumber: activeWeek.weekNumber.toString(),
-                  label: activeWeek.label,
-                  theme: activeWeek.theme ?? '',
-                  startDate: toInputDate(activeWeek.startDate),
-                  endDate: toInputDate(activeWeek.endDate),
-                })}
-                className="text-xs text-gray-400 hover:text-tps-navy ml-auto"
+                onClick={() => setWeekIdx(i => Math.max(0, i - 1))}
+                disabled={weekIdx === 0}
+                className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
               >
-                Edit week
+                ←
               </button>
-            )}
+              <select
+                value={activeWeek.id}
+                onChange={e => setWeekIdx(weeks.findIndex(w => w.id === e.target.value))}
+                className="field-input w-auto text-sm font-medium"
+              >
+                {weeks.map(w => (
+                  <option key={w.id} value={w.id}>
+                    Week {w.weekNumber} · {fmtRange(w.startDate, w.endDate)}{w.theme ? ` · ${w.theme}` : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => setWeekIdx(i => Math.min(weeks.length - 1, i + 1))}
+                disabled={weekIdx >= weeks.length - 1}
+                className="btn-secondary text-sm px-3 py-1.5 disabled:opacity-30"
+              >
+                →
+              </button>
+              {selectedEvent && (
+                <span className="text-xs bg-tps-orange/10 text-tps-orange font-semibold px-2.5 py-1.5 rounded-lg">
+                  Placing {selectedEvent.courseCode} — click a slot
+                  <button onClick={() => setSelectedEvent(null)} className="ml-1.5 text-tps-orange/60 hover:text-tps-orange">×</button>
+                </span>
+              )}
+              {canEdit && (
+                <button
+                  onClick={() => setWeekForm({
+                    weekId: activeWeek.id,
+                    weekNumber: activeWeek.weekNumber.toString(),
+                    label: activeWeek.label,
+                    theme: activeWeek.theme ?? '',
+                    startDate: toInputDate(activeWeek.startDate),
+                    endDate: toInputDate(activeWeek.endDate),
+                  })}
+                  className="text-xs text-gray-400 hover:text-tps-navy ml-auto"
+                >
+                  Edit week
+                </button>
+              )}
+            </div>
+
+            <WeekCalendar
+              week={activeWeek}
+              events={scheduled}
+              showTwoClasses={activeClasses.length > 1}
+              days={showWeekend ? 7 : 5}
+              canEdit={canEdit}
+              onSlotClick={handleSlotClick}
+              onEventClick={openSessionsForScheduled}
+              onExternalDrop={(eventId, dateISO, time) => scheduleAt(eventId, dateISO, time)}
+            />
           </div>
 
-          <WeekCalendar
-            week={activeWeek}
-            canEdit={canEdit}
-            onSlotClick={handleSlotClick}
-            onEventClick={openEventEdit}
-          />
+          {/* Side panel: unscheduled events with class toggle */}
+          {canEdit && activeClasses.length > 0 && (
+            <UnscheduledPanel
+              activeClasses={activeClasses}
+              panelClassId={panelClass?.id ?? selectedClassId}
+              onPanelClassChange={id => { setPanelClassId(id); setSelectedEvent(null) }}
+              events={panelEvents}
+              selectedEventId={selectedEvent?.id ?? null}
+              onSelect={setSelectedEvent}
+              canEdit={canEdit}
+            />
+          )}
         </div>
       )}
 
-      {/* ── List view ── */}
+      {/* ── List view (selected class weeks) ── */}
       {viewMode === 'list' && weeks.map(week => (
         <section key={week.id}>
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -760,7 +888,7 @@ export function ScheduleView({
                   key={e.scheduleId}
                   event={e}
                   canEdit={canEdit}
-                  onEdit={() => openEventEdit(e)}
+                  onEdit={() => openSessionsForScheduled(e)}
                   onToggleConfirm={() => handleToggleConfirm(e.scheduleId)}
                 />
               ))}
@@ -769,43 +897,45 @@ export function ScheduleView({
         </section>
       ))}
 
-      {/* Unassigned events */}
-      {unscheduled.length > 0 && (
-        <section>
-          <h2 className="font-bold text-gray-500 mb-2">Unassigned to a Week</h2>
-          <div className="space-y-2">
-            {unscheduled.map(e => (
-              <EventCard
-                key={e.scheduleId}
-                event={e}
-                canEdit={canEdit}
-                onEdit={() => openEventEdit(e)}
-                onToggleConfirm={() => handleToggleConfirm(e.scheduleId)}
-              />
-            ))}
+      {/* Drop conflict dialog */}
+      {dropConflicts && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDropConflicts(null)}>
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold text-amber-600">⚠ Schedule Conflict</h3>
+            <ul className="space-y-1">
+              {dropConflicts.conflicts.map((c, i) => (
+                <li key={i} className="text-sm bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <span className="font-mono font-bold text-tps-navy">{c.courseCode}</span>
+                  {' '}{c.title} · {c.time}
+                </li>
+              ))}
+            </ul>
+            <div className="flex gap-3">
+              <button onClick={() => setDropConflicts(null)} className="btn-secondary flex-1 text-sm py-2">
+                Cancel
+              </button>
+              <button onClick={dropConflicts.retry} className="flex-1 text-sm py-2 rounded-lg font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors">
+                Schedule Anyway (Override)
+              </button>
+            </div>
           </div>
-        </section>
+        </div>
       )}
 
       {/* Modals */}
-      {eventForm && (
-        <EventFormModal
-          state={eventForm}
-          weeks={weeks}
+      {sessionsModal && (
+        <SessionsModal
+          classId={sessionsModal.classId}
+          className={sessionsModal.className}
+          event={sessionsModal.event}
+          existingSessions={modalSessions}
           instructors={instructors}
-          classId={selectedClassId}
-          onClose={() => setEventForm(null)}
+          prefill={sessionsModal.prefill}
+          onClose={() => setSessionsModal(null)}
         />
       )}
       {weekForm && (
         <WeekFormModal state={weekForm} classId={selectedClassId} onClose={() => setWeekForm(null)} />
-      )}
-      {pickerOpen && (
-        <CatalogPicker
-          catalog={catalog}
-          onPick={openCatalogPick}
-          onClose={() => { setPickerOpen(false); setSlotPick(null) }}
-        />
       )}
     </div>
   )

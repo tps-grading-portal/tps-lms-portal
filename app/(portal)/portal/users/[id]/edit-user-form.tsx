@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { updateUserAction, toggleUserActiveAction, resetUserPasswordAction } from '../actions'
+import { updateUserAction, toggleUserActiveAction, resetUserPasswordAction, linkStudentToClassAction } from '../actions'
 import type { UserRole, Track } from '@prisma/client'
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -21,6 +21,11 @@ function generatePassword(): string {
   return pw
 }
 
+const TRACK_OPTIONS: { value: Track; label: string }[] = [
+  { value: 'PILOT', label: 'Pilot' }, { value: 'RPA', label: 'RPA' }, { value: 'FTE', label: 'FTE' },
+  { value: 'CSO_WSO', label: 'CSO/WSO' }, { value: 'ABM', label: 'ABM' }, { value: 'OPERATOR', label: 'STC/Operator' },
+]
+
 type Props = {
   user: {
     id:          string
@@ -36,26 +41,52 @@ type Props = {
       id: string; classId: string; className: string; number: number; track: Track
     } | null
   }
+  classes: { id: string; name: string; isActive: boolean }[]
 }
 
-export function EditUserForm({ user }: Props) {
+type PrivilegeClearPrompt = {
+  assignmentCount: number
+  deptCount:       number
+  previousRole:    UserRole
+}
+
+export function EditUserForm({ user, classes }: Props) {
   const router = useRouter()
   const [pending, startTx] = useTransition()
   const [error,   setError] = useState<string | null>(null)
   const [saved,   setSaved] = useState(false)
   const [newPassword, setNewPassword] = useState<string | null>(null)
+  const [privPrompt, setPrivPrompt] = useState<PrivilegeClearPrompt | null>(null)
 
   const [firstName, setFirstName] = useState(user.firstName)
   const [lastName,  setLastName]  = useState(user.lastName)
   const [role,      setRole]      = useState<UserRole>(user.role)
 
-  function handleSave() {
+  // Student → class assignment
+  const [linkClassId, setLinkClassId] = useState(classes.find(c => c.isActive)?.id ?? classes[0]?.id ?? '')
+  const [linkTrack,   setLinkTrack]   = useState<Track>('PILOT')
+
+  function handleSave(clearPrivileges = false) {
     setError(null)
     startTx(async () => {
-      const result = await updateUserAction(user.id, { firstName, lastName, role })
+      const result = await updateUserAction(user.id, { firstName, lastName, role, clearPrivileges })
+      if ('needsPrivilegeClear' in result && result.needsPrivilegeClear) {
+        setPrivPrompt(result.needsPrivilegeClear)
+        return
+      }
       if ('error' in result) { setError(result.error ?? 'Failed'); return }
+      setPrivPrompt(null)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
+      router.refresh()
+    })
+  }
+
+  function handleLinkToClass() {
+    setError(null)
+    startTx(async () => {
+      const result = await linkStudentToClassAction(user.id, linkClassId, linkTrack)
+      if ('error' in result) { setError(result.error ?? 'Failed'); return }
       router.refresh()
     })
   }
@@ -139,8 +170,39 @@ export function EditUserForm({ user }: Props) {
         {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
         {saved && <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">Saved.</div>}
 
+        {/* Privilege clear confirmation — student demotion */}
+        {privPrompt && (
+          <div className="rounded-lg bg-amber-50 border border-amber-300 px-4 py-3 space-y-3">
+            <p className="text-sm font-semibold text-amber-800">
+              ⚠ This user still holds privileges
+            </p>
+            <p className="text-sm text-amber-800">
+              {privPrompt.assignmentCount > 0 && `${privPrompt.assignmentCount} course/phase assignment${privPrompt.assignmentCount === 1 ? '' : 's'}`}
+              {privPrompt.assignmentCount > 0 && privPrompt.deptCount > 0 && ' and '}
+              {privPrompt.deptCount > 0 && `${privPrompt.deptCount} department assignment${privPrompt.deptCount === 1 ? '' : 's'}`}
+              {'. '}Students cannot hold instructor privileges.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => handleSave(true)}
+                disabled={pending}
+                className="text-sm px-4 py-2 rounded-lg font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+              >
+                Clear All Privileges &amp; Make Student
+              </button>
+              <button
+                onClick={() => { setRole(privPrompt.previousRole); setPrivPrompt(null) }}
+                disabled={pending}
+                className="btn-secondary text-sm px-4 py-2"
+              >
+                Cancel — keep as {privPrompt.previousRole.replace(/_/g, ' ')}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-3 pt-1">
-          <button onClick={handleSave} disabled={pending} className="btn-primary text-sm px-5 py-2.5">
+          <button onClick={() => handleSave()} disabled={pending} className="btn-primary text-sm px-5 py-2.5">
             {pending ? 'Saving…' : 'Save Changes'}
           </button>
           <button onClick={() => router.push('/portal/users')} className="btn-secondary text-sm px-4 py-2.5" disabled={pending}>
@@ -148,6 +210,38 @@ export function EditUserForm({ user }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Assign student to a class (creates their roster profile) */}
+      {user.role === 'STUDENT' && !user.studentProfile && classes.length > 0 && (
+        <div className="card space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-tps-navy">Assign to a Class</p>
+            <p className="text-xs text-gray-400">
+              This student has no class roster profile. The class assignment
+              dictates their curriculum (roadmap + gradesheets).
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap items-end">
+            <div>
+              <label className="field-label">Class</label>
+              <select value={linkClassId} onChange={e => setLinkClassId(e.target.value)} className="field-input w-auto text-sm" disabled={pending}>
+                {classes.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}{c.isActive ? ' (active)' : ''}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="field-label">Track</label>
+              <select value={linkTrack} onChange={e => setLinkTrack(e.target.value as Track)} className="field-input w-auto text-sm" disabled={pending}>
+                {TRACK_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </div>
+            <button onClick={handleLinkToClass} disabled={pending || !linkClassId} className="btn-primary text-sm px-4 py-2">
+              {pending ? 'Assigning…' : 'Assign to Class'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Linked student profile */}
       {user.studentProfile && (
