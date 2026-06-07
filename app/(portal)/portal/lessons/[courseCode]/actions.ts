@@ -352,46 +352,69 @@ export async function replaceContentFileAction(contentFileId: string, blob: Uplo
   }
 }
 
-// ── Direct approval — "ready to display to students" ─────────────────────────
+// ── Direct approval — release to THIS CLASS's students ───────────────────────
+//
+// Approval of a document is per course PER CLASS. The vault holds the source
+// document; each class link must be released separately, so 26B approving a
+// doc never exposes it to 27A.
 
 const DIRECT_APPROVERS = ['A9_STANDARDS', 'DEAN_COMMANDER', 'SYSTEM_ADMIN']
 
-export async function approveForStudentsAction(contentFileId: string) {
+export async function approveForClassAction(lessonPageFileId: string) {
   const user = await requireAuth()
   if (!DIRECT_APPROVERS.includes(user.role)) {
-    return { error: 'Only A9, the Dean, or an admin can approve content for student display directly.' }
+    return { error: 'Only A9, the Dean, or an admin can approve content for student display.' }
   }
 
-  const content = await db.contentFile.findUnique({
-    where:   { id: contentFileId },
-    include: { syllabusEvent: { select: { courseCode: true, title: true, tracks: true } } },
+  const link = await db.lessonPageFile.findUnique({
+    where: { id: lessonPageFileId },
+    include: {
+      contentFile: { select: { id: true, title: true, status: true } },
+      lessonPage: {
+        select: {
+          classId: true,
+          class:   { select: { name: true } },
+          syllabusEvent: { select: { courseCode: true, title: true, tracks: true } },
+        },
+      },
+    },
   })
-  if (!content) return { error: 'File not found.' }
-  if (content.status === 'VAULT') return { error: 'Already approved.' }
+  if (!link) return { error: 'File link not found.' }
+  if (link.approvedForClassAt) return { error: 'Already released to this class.' }
 
-  await db.contentFile.update({ where: { id: contentFileId }, data: { status: 'VAULT' } })
-  await db.contentWorkflow.updateMany({
-    where: { contentFileId },
-    data:  { currentStatus: 'VAULT', a9ReviewedById: user.id, a9ReviewedAt: new Date(), a9Notes: 'Direct approval for student display' },
+  // The source document goes to the vault (if not already there)…
+  if (link.contentFile.status !== 'VAULT') {
+    await db.contentFile.update({ where: { id: link.contentFile.id }, data: { status: 'VAULT' } })
+    await db.contentWorkflow.updateMany({
+      where: { contentFileId: link.contentFile.id },
+      data:  { currentStatus: 'VAULT', a9ReviewedById: user.id, a9ReviewedAt: new Date(), a9Notes: 'Direct approval for student display' },
+    })
+  }
+
+  // …and is released for THIS class only
+  await db.lessonPageFile.update({
+    where: { id: lessonPageFileId },
+    data:  { approvedForClassAt: new Date(), approvedForClassById: user.id },
   })
 
+  const event = link.lessonPage.syllabusEvent
   await db.auditLog.create({
     data: {
       userId:     user.id,
-      action:     'DIRECT_APPROVE_CONTENT',
-      targetId:   contentFileId,
+      action:     'APPROVE_CONTENT_FOR_CLASS',
+      targetId:   link.contentFile.id,
       targetType: 'ContentFile',
-      metadata:   { title: content.title },
+      metadata:   { title: link.contentFile.title, courseCode: event.courseCode, className: link.lessonPage.class?.name ?? null },
     },
   })
 
-  // Notify the class's students
-  if (content.syllabusEvent) {
+  // Notify only THIS class's students
+  if (link.lessonPage.classId) {
     const students = await db.student.findMany({
       where: {
-        userId: { not: null },
-        track:  { in: content.syllabusEvent.tracks },
-        class:  { isActive: true, archivedAt: null },
+        userId:  { not: null },
+        classId: link.lessonPage.classId,
+        track:   { in: event.tracks },
       },
       select: { userId: true },
     })
@@ -399,15 +422,15 @@ export async function approveForStudentsAction(contentFileId: string) {
       await db.notification.createMany({
         data: students.map(s => ({
           userId: s.userId!,
-          title:  `New content available for ${content.syllabusEvent!.courseCode}`,
-          body:   `"${content.title}" is now available on the ${content.syllabusEvent!.courseCode} course page.`,
-          href:   `/portal/lessons/${encodeURIComponent(content.syllabusEvent!.courseCode)}`,
+          title:  `New content available for ${event.courseCode}`,
+          body:   `"${link.contentFile.title}" is now available on the ${event.courseCode} course page.`,
+          href:   `/portal/lessons/${encodeURIComponent(event.courseCode)}`,
         })),
       })
     }
-    revalidatePath(`/portal/lessons/${content.syllabusEvent.courseCode}`)
   }
 
+  revalidatePath(`/portal/lessons/${event.courseCode}`)
   revalidatePath('/portal/vault')
   return { ok: true }
 }

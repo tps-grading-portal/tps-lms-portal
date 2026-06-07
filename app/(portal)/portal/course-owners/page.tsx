@@ -27,7 +27,8 @@ export default async function CourseOwnersPage() {
       include: { user: { select: { id: true, firstName: true, lastName: true, role: true, isActive: true } } },
     }),
     db.user.findMany({
-      where:   { isActive: true, role: { in: ['LINE_INSTRUCTOR', 'GUEST_INSTRUCTOR', 'DEPT_CHAIR', 'ADO', 'DO'] } },
+      // Guest instructor and above — anyone except students and schedulers
+      where:   { isActive: true, role: { notIn: ['STUDENT', 'SCHEDULER'] } },
       orderBy: { lastName: 'asc' },
       select:  { id: true, firstName: true, lastName: true },
     }),

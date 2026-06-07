@@ -13,6 +13,9 @@ type Props = {
   events:               RoadmapEvent[]
   studentName:          string | null
   studentConcentration: 'FTC' | 'STC' | null
+  viewClassId:          string | null
+  viewClassName:        string | null
+  classOptions:         { id: string; name: string; isActive: boolean; isPlanning: boolean }[]
   editScope:            RoadmapData['editScope']
 }
 
@@ -46,14 +49,16 @@ function scoreColor(score: number): string {
 
 // ── Event card ────────────────────────────────────────────────────────────────
 
-function EventNode({ event, expanded, onToggle, eventById, canEdit, onRemove }: {
-  event:     RoadmapEvent
-  expanded:  boolean
-  onToggle:  () => void
-  eventById: Map<string, RoadmapEvent>
-  canEdit:   boolean
-  onRemove:  () => void
+function EventNode({ event, expanded, onToggle, eventById, canEdit, onRemove, viewClassId }: {
+  event:       RoadmapEvent
+  expanded:    boolean
+  onToggle:    () => void
+  eventById:   Map<string, RoadmapEvent>
+  canEdit:     boolean
+  onRemove:    () => void
+  viewClassId: string | null
 }) {
+  const classQS = viewClassId ? `?classId=${viewClassId}` : ''
   const meta = getStatusMeta(event.status)
 
   return (
@@ -121,7 +126,7 @@ function EventNode({ event, expanded, onToggle, eventById, canEdit, onRemove }: 
                 return (
                   <Link
                     key={pid}
-                    href={`/portal/lessons/${encodeURIComponent(prereq.courseCode)}`}
+                    href={`/portal/lessons/${encodeURIComponent(prereq.courseCode)}${classQS}`}
                     className="font-mono font-bold bg-gray-100 hover:bg-tps-navy/10 text-tps-navy px-1.5 py-0.5 rounded"
                   >
                     {prereq.courseCode}
@@ -132,7 +137,7 @@ function EventNode({ event, expanded, onToggle, eventById, canEdit, onRemove }: 
           )}
           <div className="flex items-center justify-between gap-2">
             <Link
-              href={`/portal/lessons/${encodeURIComponent(event.courseCode)}`}
+              href={`/portal/lessons/${encodeURIComponent(event.courseCode)}${classQS}`}
               className="inline-block text-xs font-semibold text-tps-orange hover:underline"
             >
               Open lesson page →
@@ -210,7 +215,14 @@ const TRACK_OPTIONS: { value: Track; label: string }[] = [
   { value: 'FTE', label: 'FTE' }, { value: 'ABM', label: 'ABM' }, { value: 'OPERATOR', label: 'STC/Operator' },
 ]
 
-function AddCourseModal({ editScope, onClose }: { editScope: Props['editScope']; onClose: () => void }) {
+function AddCourseModal({
+  editScope, classOptions, viewClassId, onClose,
+}: {
+  editScope:    Props['editScope']
+  classOptions: Props['classOptions']
+  viewClassId:  string | null
+  onClose:      () => void
+}) {
   const router = useRouter()
   const [pending, startTx]  = useTransition()
   const [error,   setError] = useState<string | null>(null)
@@ -223,6 +235,7 @@ function AddCourseModal({ editScope, onClose }: { editScope: Props['editScope'];
   const [suffix,     setSuffix]     = useState<EventSuffix>('A')
   const [tracks,     setTracks]     = useState<Track[]>([...FTC_TRACKS, 'OPERATOR'])
   const [description, setDescription] = useState('')
+  const [forClassId,  setForClassId]  = useState<string>(viewClassId ?? '')
 
   function toggleTrack(t: Track) {
     setTracks(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
@@ -242,6 +255,7 @@ function AddCourseModal({ editScope, onClose }: { editScope: Props['editScope'];
         phase:       numMatch ? parseInt(numMatch[1][0]) : 6,
         tracks,
         description: description || null,
+        forClassId:  forClassId || null,
       })
       if ('error' in result && result.error) { setError(result.error); return }
       router.refresh()
@@ -313,6 +327,16 @@ function AddCourseModal({ editScope, onClose }: { editScope: Props['editScope'];
         </div>
 
         <div>
+          <label className="field-label">Applies To *</label>
+          <select value={forClassId} onChange={e => setForClassId(e.target.value)} className="field-input" disabled={pending}>
+            <option value="">All classes (every MCG)</option>
+            {classOptions.map(c => (
+              <option key={c.id} value={c.id}>Class {c.name} only</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
           <label className="field-label">Description</label>
           <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className="field-input" disabled={pending} />
         </div>
@@ -331,7 +355,9 @@ function AddCourseModal({ editScope, onClose }: { editScope: Props['editScope'];
 
 const ALL_STATUSES: (SyllabusEventStatus | 'all')[] = ['all', 'LOCKED', 'UPCOMING', 'IN_PROGRESS', 'COMPLETED', 'REVIEW']
 
-export function RoadmapView({ events, studentName, studentConcentration, editScope }: Props) {
+export function RoadmapView({
+  events, studentName, studentConcentration, viewClassId, viewClassName, classOptions, editScope,
+}: Props) {
   const router = useRouter()
   const [filterStatus, setFilterStatus] = useState<SyllabusEventStatus | 'all'>('all')
   const [filterDept,   setFilterDept]   = useState<DepartmentCode | 'all'>('all')
@@ -389,9 +415,10 @@ export function RoadmapView({ events, studentName, studentConcentration, editSco
   }
 
   function handleRemove(event: RoadmapEvent) {
-    if (!confirm(`Remove ${event.courseCode} — ${event.title} from the syllabus? It can be re-added later.`)) return
+    const label = viewClassName ? `Class ${viewClassName}'s syllabus` : 'the syllabus'
+    if (!confirm(`Remove ${event.courseCode} — ${event.title} from ${label}? It can be re-added later.`)) return
     startTx(async () => {
-      const result = await removeSyllabusEventAction(event.id)
+      const result = await removeSyllabusEventAction(event.id, viewClassId)
       if ('error' in result && result.error) { alert(result.error); return }
       router.refresh()
     })
@@ -401,10 +428,36 @@ export function RoadmapView({ events, studentName, studentConcentration, editSco
 
   return (
     <div className="space-y-6">
+      {/* Class syllabus selector — every class runs its own MCG */}
+      {classOptions.length > 1 && (
+        <div className="flex gap-1 flex-wrap items-center">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide mr-1">Syllabus:</span>
+          {classOptions.map(c => (
+            <Link
+              key={c.id}
+              href={`/portal/syllabus?classId=${c.id}`}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
+                c.id === viewClassId
+                  ? 'bg-tps-navy text-white'
+                  : 'bg-white border border-gray-200 text-gray-600 hover:border-tps-orange hover:text-tps-orange'
+              }`}
+            >
+              {c.name}
+              {c.isPlanning && !c.isActive && (
+                <span className="ml-1.5 text-[10px] font-normal opacity-70">(planning)</span>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
+
       {/* Student context banner — crew position dictates FTC/STC */}
       {studentName && (
         <div className="card bg-tps-navy text-white py-3 flex items-center justify-between flex-wrap gap-2">
-          <p className="text-sm font-semibold">Viewing roadmap for: {studentName}</p>
+          <p className="text-sm font-semibold">
+            Viewing roadmap for: {studentName}
+            {viewClassName && <span className="text-white/60"> · Class {viewClassName} syllabus</span>}
+          </p>
           {studentConcentration && (
             <span className="text-xs font-bold bg-white/15 px-2.5 py-1 rounded-lg">
               {CONC_LABELS[studentConcentration]}
@@ -537,6 +590,7 @@ export function RoadmapView({ events, studentName, studentConcentration, editSco
                         eventById={eventById}
                         canEdit={canEditDept(event.deptCode)}
                         onRemove={() => handleRemove(event)}
+                        viewClassId={viewClassId}
                       />
                     ))}
                   </div>
@@ -547,7 +601,14 @@ export function RoadmapView({ events, studentName, studentConcentration, editSco
         </div>
       ))}
 
-      {addOpen && <AddCourseModal editScope={editScope} onClose={() => setAddOpen(false)} />}
+      {addOpen && (
+        <AddCourseModal
+          editScope={editScope}
+          classOptions={classOptions}
+          viewClassId={viewClassId}
+          onClose={() => setAddOpen(false)}
+        />
+      )}
     </div>
   )
 }

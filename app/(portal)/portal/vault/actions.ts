@@ -144,18 +144,32 @@ export async function advanceContentAction(
       data:  updateData,
     })
 
-    // A9 approval → notify students of the class the content is for
+    // Final approval → the source document is vaulted. Release is per class:
+    // if the file is attached to exactly ONE class's course page, release it
+    // there and notify that class. If it's linked to multiple classes (e.g.
+    // after duplication), each class must be released individually from its
+    // own course page — approval for one class never exposes another.
     if (nextStatus === 'VAULT' && content.syllabusEventId) {
       const event = await db.syllabusEvent.findUnique({
         where:  { id: content.syllabusEventId },
         select: { courseCode: true, title: true, tracks: true },
       })
-      if (event) {
+      const links = await db.lessonPageFile.findMany({
+        where:   { contentFileId: contentId, approvedForClassAt: null },
+        include: { lessonPage: { select: { classId: true } } },
+      })
+      const classIds = [...new Set(links.map(l => l.lessonPage.classId).filter(Boolean))] as string[]
+
+      if (event && classIds.length === 1) {
+        await db.lessonPageFile.updateMany({
+          where: { contentFileId: contentId, lessonPage: { classId: classIds[0] } },
+          data:  { approvedForClassAt: now, approvedForClassById: user.id },
+        })
         const students = await db.student.findMany({
           where: {
-            userId: { not: null },
-            track:  { in: event.tracks },
-            class:  { isActive: true, archivedAt: null },
+            userId:  { not: null },
+            classId: classIds[0],
+            track:   { in: event.tracks },
           },
           select: { userId: true },
         })
@@ -169,8 +183,8 @@ export async function advanceContentAction(
             })),
           })
         }
-        revalidatePath(`/portal/lessons/${event.courseCode}`)
       }
+      if (event) revalidatePath(`/portal/lessons/${event.courseCode}`)
     }
 
     revalidatePath('/portal/vault')

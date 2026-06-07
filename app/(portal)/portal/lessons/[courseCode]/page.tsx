@@ -31,6 +31,7 @@ type RawFile = {
   id: string
   lessonId: string | null
   displayLabel: string | null
+  approvedForClassAt: Date | null
   contentFile: {
     id: string; title: string; storageUrl: string | null; mimeType: string | null
     fileSizeBytes: number | null; status: string; fileName: string | null
@@ -39,15 +40,16 @@ type RawFile = {
 
 function toFileRow(f: RawFile): FileRow {
   return {
-    id:            f.id,
-    contentFileId: f.contentFile.id,
-    title:         f.contentFile.title,
-    fileName:      f.contentFile.fileName,
-    storageUrl:    f.contentFile.storageUrl,
-    mimeType:      f.contentFile.mimeType,
-    fileSizeBytes: f.contentFile.fileSizeBytes,
-    status:        f.contentFile.status,
-    displayLabel:  f.displayLabel,
+    id:               f.id,
+    contentFileId:    f.contentFile.id,
+    title:            f.contentFile.title,
+    fileName:         f.contentFile.fileName,
+    storageUrl:       f.contentFile.storageUrl,
+    mimeType:         f.contentFile.mimeType,
+    fileSizeBytes:    f.contentFile.fileSizeBytes,
+    status:           f.contentFile.status,
+    approvedForClass: f.approvedForClassAt !== null,
+    displayLabel:     f.displayLabel,
   }
 }
 
@@ -82,8 +84,9 @@ export default async function LessonPage({
 
   const statusMeta = studentContext ? STATUS_STYLES[studentContext.status] : null
 
-  // Students only see fully approved (VAULT) files
-  const visibleFile = (f: RawFile) => !isStudent || f.contentFile.status === 'VAULT'
+  // Students only see vault-approved files RELEASED FOR THEIR CLASS
+  const visibleFile = (f: RawFile) =>
+    !isStudent || (f.contentFile.status === 'VAULT' && f.approvedForClassAt !== null)
 
   const allFiles: RawFile[] = (lesson?.files ?? []) as RawFile[]
   const courseFiles: FileRow[] = allFiles

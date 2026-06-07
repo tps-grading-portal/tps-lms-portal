@@ -25,7 +25,7 @@ type Props = {
   catalog:     CatalogOption[]
 }
 
-const INSTRUCTOR_ROLES: UserRole[] = ['LINE_INSTRUCTOR', 'GUEST_INSTRUCTOR', 'DEPT_CHAIR', 'ADO', 'DO']
+const INSTRUCTOR_ROLES: UserRole[] = ['LINE_INSTRUCTOR', 'GUEST_INSTRUCTOR', 'DEPT_CHAIR', 'ADO', 'DO', 'A9_STANDARDS', 'DEAN_COMMANDER', 'SYSTEM_ADMIN']
 
 export function PrivilegesPanel({ userId, role, departments, assignments, catalog }: Props) {
   const router = useRouter()

@@ -29,7 +29,7 @@ export default async function ChatPage() {
   const channels = await getChannelsAction(activeClass.id)
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-[1700px] mx-auto">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">Digital Squadron</h1>

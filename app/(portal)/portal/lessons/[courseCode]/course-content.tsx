@@ -4,7 +4,7 @@ import { useState, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { upload } from '@vercel/blob/client'
 import {
-  registerCourseContentAction, replaceContentFileAction, approveForStudentsAction,
+  registerCourseContentAction, replaceContentFileAction, approveForClassAction,
   saveLessonAction, deleteLessonAction, detachFileFromLessonAction,
   duplicateCourseContentAction,
 } from './actions'
@@ -29,15 +29,16 @@ async function uploadToBlob(file: File) {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type FileRow = {
-  id:            string   // LessonPageFile id
-  contentFileId: string
-  title:         string
-  fileName:      string | null
-  storageUrl:    string | null
-  mimeType:      string | null
-  fileSizeBytes: number | null
-  status:        string   // ContentStatus
-  displayLabel:  string | null
+  id:               string   // LessonPageFile id
+  contentFileId:    string
+  title:            string
+  fileName:         string | null
+  storageUrl:       string | null
+  mimeType:         string | null
+  fileSizeBytes:    number | null
+  status:           string   // ContentStatus (the source document's vault state)
+  approvedForClass: boolean  // released to THIS class's students
+  displayLabel:     string | null
 }
 
 export type LessonRow = {
@@ -99,7 +100,9 @@ function FileItem({
   const [busy,  setBusy]  = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const approved = file.status === 'VAULT'
+  // Fully visible to students = vaulted AND released for this class
+  const approved = file.status === 'VAULT' && file.approvedForClass
+  const vaultedNotReleased = file.status === 'VAULT' && !file.approvedForClass
   const pendingLabel = PENDING_STAGE_LABELS[file.status]
 
   async function handleReplace(files: FileList | null) {
@@ -128,10 +131,10 @@ function FileItem({
   }
 
   async function handleApprove() {
-    if (!confirm(`Approve "${file.displayLabel || file.title}" for student display now?`)) return
+    if (!confirm(`Release "${file.displayLabel || file.title}" to THIS class's students? Other classes are unaffected.`)) return
     setBusy('approve')
     setError(null)
-    const result = await approveForStudentsAction(file.contentFileId)
+    const result = await approveForClassAction(file.id)
     setBusy(null)
     if ('error' in result && result.error) { setError(result.error); return }
     router.refresh()
@@ -151,7 +154,12 @@ function FileItem({
           </p>
           <p className="text-xs text-gray-400">
             {fmtSize(file.fileSizeBytes)}
-            {!approved && pendingLabel && (
+            {vaultedNotReleased && (
+              <span className="ml-2 inline-block px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold">
+                In vault — not released to this class
+              </span>
+            )}
+            {!approved && !vaultedNotReleased && pendingLabel && (
               <span className="ml-2 inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold">
                 ⏳ {pendingLabel} — not visible to students
               </span>
@@ -183,7 +191,7 @@ function FileItem({
               </button>
             </>
           )}
-          {!approved && canAuthor && file.status !== 'PENDING_DEAN' && (
+          {!approved && !vaultedNotReleased && canAuthor && file.status !== 'PENDING_DEAN' && (
             <button
               onClick={handleRoute}
               disabled={!!busy}
@@ -198,9 +206,9 @@ function FileItem({
               onClick={handleApprove}
               disabled={!!busy}
               className="text-xs px-2.5 py-1.5 rounded-lg font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
-              title="Approve for student display now"
+              title="Release to this class's students (other classes unaffected)"
             >
-              {busy === 'approve' ? '…' : 'Approve'}
+              {busy === 'approve' ? '…' : vaultedNotReleased ? 'Release to Class' : 'Approve'}
             </button>
           )}
           {canAuthor && (

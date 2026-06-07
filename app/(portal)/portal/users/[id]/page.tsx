@@ -8,7 +8,8 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Edit User' }
 
-const INSTRUCTOR_ROLES = ['LINE_INSTRUCTOR', 'GUEST_INSTRUCTOR', 'DEPT_CHAIR', 'ADO', 'DO']
+// Guest instructor and above — anyone except students and schedulers
+const INSTRUCTOR_ROLES = ['LINE_INSTRUCTOR', 'GUEST_INSTRUCTOR', 'DEPT_CHAIR', 'ADO', 'DO', 'A9_STANDARDS', 'DEAN_COMMANDER', 'SYSTEM_ADMIN']
 
 export default async function EditUserPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth()

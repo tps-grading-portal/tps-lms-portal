@@ -441,6 +441,7 @@ model SyllabusEvent {
   isActive      Boolean        @default(true)
   sortOrder     Int            @default(0)
   defaultDurationMinutes Int?  // typical course length — pre-fills the scheduler
+  classId       String?        // null = on every class's syllabus; set = class-specific MCG addition
 
   // Which tracks must complete this event
   tracks        Track[]
@@ -461,8 +462,23 @@ model SyllabusEvent {
   surveyDeployments SurveyDeployment[]
   lessonPages      LessonPage[]
   courseAssignments CourseAssignment[]
+  classExclusions  ClassSyllabusExclusion[]
 
   @@map("syllabus_events")
+}
+
+// A common (classId-null) course removed from one class's MCG syllabus —
+// each class gets its own MCG, so membership can differ per cohort.
+model ClassSyllabusExclusion {
+  id              String   @id @default(cuid())
+  classId         String
+  syllabusEventId String
+  createdAt       DateTime @default(now())
+
+  syllabusEvent SyllabusEvent @relation(fields: [syllabusEventId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, syllabusEventId])
+  @@map("class_syllabus_exclusions")
 }
 
 // Self-referential prerequisites
@@ -694,14 +710,18 @@ model Lesson {
 }
 
 // Junction: file attached to a course page (lessonId null = course-wide)
-// or to a specific lesson within it
+// or to a specific lesson within it.
+// Approval is per course PER CLASS: the vault approves the source document,
+// but students of a class only see it once it's released for THEIR class.
 model LessonPageFile {
-  id            String  @id @default(cuid())
-  lessonPageId  String
-  lessonId      String? // null = course-wide material
-  contentFileId String
-  sortOrder     Int     @default(0)
-  displayLabel  String?
+  id                  String    @id @default(cuid())
+  lessonPageId        String
+  lessonId            String?   // null = course-wide material
+  contentFileId       String
+  sortOrder           Int       @default(0)
+  displayLabel        String?
+  approvedForClassAt  DateTime? // null = not yet released to this class's students
+  approvedForClassById String?
 
   lessonPage  LessonPage  @relation(fields: [lessonPageId],  references: [id], onDelete: Cascade)
   lesson      Lesson?     @relation(fields: [lessonId],      references: [id], onDelete: Cascade)
