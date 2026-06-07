@@ -2,17 +2,21 @@ import { requireAuth } from '@/lib/server-auth'
 import { db } from '@/lib/db'
 import { can } from '@/lib/permissions'
 import Link from 'next/link'
+import { GradesTabs } from '@/components/portal/grades-tabs'
 import type { Metadata } from 'next'
 
-export const metadata: Metadata = { title: 'My Grades' }
+export const metadata: Metadata = { title: 'Grades' }
 
 export default async function GradesPage() {
   const user = await requireAuth()
 
-  // Instructors → redirect to the grading queue
-  if (can(user.role, 'grade:enter')) {
+  // The Grades dashboard routes by role: graders → queue; analytics-only
+  // roles → analytics; students stay here for My Grades.
+  if (user.role !== 'STUDENT') {
     const { redirect } = await import('next/navigation')
-    redirect('/portal/grade')
+    if (can(user.role, 'grade:queue')) redirect('/portal/grade')
+    if (can(user.role, 'view:instructor_analytics')) redirect('/portal/analytics')
+    redirect('/portal/grades/exports')
   }
 
   // Students — load their own gradebook entries
@@ -55,6 +59,8 @@ export default async function GradesPage() {
           {submitted.length}/{student.entries.length} events graded
         </p>
       </div>
+
+      <GradesTabs role={user.role} />
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-3">

@@ -5,6 +5,7 @@ import { saveLessonPageAction } from './actions'
 
 type Props = {
   syllabusEventId: string
+  classId:         string
   initial: {
     overview:           string
     learningObjectives: string[]
@@ -14,7 +15,7 @@ type Props = {
   }
 }
 
-export function LessonEditor({ syllabusEventId, initial }: Props) {
+export function LessonEditor({ syllabusEventId, classId, initial }: Props) {
   const [open,    setOpen]    = useState(false)
   const [pending, startTx]   = useTransition()
   const [saved,   setSaved]   = useState(false)
@@ -37,7 +38,7 @@ export function LessonEditor({ syllabusEventId, initial }: Props) {
   function handleSave() {
     setError(null)
     startTx(async () => {
-      const result = await saveLessonPageAction(syllabusEventId, {
+      const result = await saveLessonPageAction(syllabusEventId, classId, {
         overview,
         learningObjectives: objectives.filter(o => o.trim()),
         outline,

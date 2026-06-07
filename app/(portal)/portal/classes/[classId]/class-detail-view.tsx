@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { addStudentAction, updateClassAction, archiveClassAction, createStudentLoginAction } from '../actions'
+import { addStudentAction, updateClassAction, archiveClassAction, createStudentLoginAction, deleteClassAction } from '../actions'
 import type { Track, Concentration } from '@prisma/client'
 
 const TRACK_LABELS: Record<Track, string> = {
@@ -40,6 +40,8 @@ type ClassInfo = {
   startDate:     string | null
   endDate:       string | null
   isActive:      boolean
+  isPlanning:    boolean
+  isAdmin:       boolean
   archivedAt:    string | null
   scheduledEventCount: number
 }
@@ -265,13 +267,16 @@ function ClassSettingsModal({ cls, onClose }: { cls: ClassInfo; onClose: () => v
   const [error,   setError] = useState<string | null>(null)
   const [deactChoices, setDeactChoices] = useState<{ id: string; name: string }[] | null>(null)
   const [deactPick,    setDeactPick]    = useState('')
+  const [studentDecision, setStudentDecision] = useState<{ userId: string; name: string }[] | null>(null)
+  const [keepIds,         setKeepIds]         = useState<Set<string>>(new Set())
 
   const [concentration, setConcentration] = useState<Concentration | ''>(cls.concentration ?? '')
   const [startDate,     setStartDate]     = useState(cls.startDate?.slice(0, 10) ?? '')
   const [endDate,       setEndDate]       = useState(cls.endDate?.slice(0, 10) ?? '')
   const [isActive,      setIsActive]      = useState(cls.isActive)
+  const [isPlanning,    setIsPlanning]    = useState(cls.isPlanning)
 
-  function handleSave(deactivateClassId: string | null = null) {
+  function handleSave(deactivateClassId: string | null = null, studentKeepUserIds: string[] | null = null) {
     setError(null)
     startTx(async () => {
       const result = await updateClassAction(cls.id, {
@@ -279,10 +284,17 @@ function ClassSettingsModal({ cls, onClose }: { cls: ClassInfo; onClose: () => v
         startDate:     startDate || null,
         endDate:       endDate || null,
         isActive,
+        isPlanning,
         deactivateClassId,
+        studentKeepUserIds,
       })
       if ('needsDeactivation' in result && result.needsDeactivation) {
         setDeactChoices(result.needsDeactivation)
+        return
+      }
+      if ('needsStudentDecision' in result && result.needsStudentDecision) {
+        setStudentDecision(result.needsStudentDecision)
+        setKeepIds(new Set())
         return
       }
       if ('error' in result) { setError(result.error ?? 'Failed'); return }
@@ -291,10 +303,27 @@ function ClassSettingsModal({ cls, onClose }: { cls: ClassInfo; onClose: () => v
     })
   }
 
+  function toggleKeep(userId: string) {
+    setKeepIds(prev => {
+      const next = new Set(prev)
+      if (next.has(userId)) { next.delete(userId) } else { next.add(userId) }
+      return next
+    })
+  }
+
   function handleArchive() {
     if (!confirm(`Archive class ${cls.name}? It will be hidden from active views but data is preserved.`)) return
     startTx(async () => {
       await archiveClassAction(cls.id)
+      router.push('/portal/classes')
+    })
+  }
+
+  function handleDelete() {
+    if (!confirm(`DELETE class ${cls.name} permanently? All students, schedules, course pages, and grades for this class are removed. This cannot be undone.`)) return
+    startTx(async () => {
+      const result = await deleteClassAction(cls.id)
+      if ('error' in result && result.error) { setError(result.error); return }
       router.push('/portal/classes')
     })
   }
@@ -330,10 +359,45 @@ function ClassSettingsModal({ cls, onClose }: { cls: ClassInfo; onClose: () => v
 
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} className="rounded border-gray-300 text-tps-orange focus:ring-tps-orange" disabled={pending} />
-            <span className="text-sm text-gray-700">Active class</span>
+            <span className="text-sm text-gray-700">Active class <span className="text-gray-400">(grading + full operations)</span></span>
+          </label>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={isPlanning} onChange={e => setIsPlanning(e.target.checked)} className="rounded border-gray-300 text-tps-orange focus:ring-tps-orange" disabled={pending} />
+            <span className="text-sm text-gray-700">Active for Planning <span className="text-gray-400">(schedulable + course sites, before grading starts)</span></span>
           </label>
 
           {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+          {/* Graduation/deactivation — decide student access */}
+          {studentDecision && (
+            <div className="rounded-lg bg-amber-50 border border-amber-300 px-3 py-3 space-y-2">
+              <p className="text-sm font-semibold text-amber-800">
+                ⚠ Deactivating Class {cls.name} will deactivate {studentDecision.length} student account{studentDecision.length === 1 ? '' : 's'}.
+              </p>
+              <p className="text-xs text-amber-800">Check any students who should keep their access:</p>
+              <div className="max-h-40 overflow-y-auto space-y-1 bg-white rounded-lg p-2 border border-amber-200">
+                {studentDecision.map(s => (
+                  <label key={s.userId} className="flex items-center gap-2 text-sm cursor-pointer px-1 py-0.5">
+                    <input
+                      type="checkbox"
+                      checked={keepIds.has(s.userId)}
+                      onChange={() => toggleKeep(s.userId)}
+                      className="rounded border-gray-300 text-tps-orange focus:ring-tps-orange"
+                    />
+                    {s.name}
+                  </label>
+                ))}
+              </div>
+              <button
+                onClick={() => { setStudentDecision(null); handleSave(null, [...keepIds]) }}
+                disabled={pending}
+                className="w-full text-sm py-2 rounded-lg font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+              >
+                Deactivate Class ({keepIds.size} student{keepIds.size === 1 ? '' : 's'} keep access)
+              </button>
+            </div>
+          )}
 
           {/* Two-active-class limit */}
           {deactChoices && (
@@ -363,13 +427,23 @@ function ClassSettingsModal({ cls, onClose }: { cls: ClassInfo; onClose: () => v
             </div>
           )}
 
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-3 pt-2 items-center flex-wrap">
             <button onClick={() => handleSave()} disabled={pending} className="btn-primary flex-1 text-sm py-2.5">
               {pending ? 'Saving…' : 'Save'}
             </button>
             {!cls.archivedAt && (
               <button onClick={handleArchive} disabled={pending} className="text-sm text-red-500 hover:text-red-700 px-3">
                 Archive
+              </button>
+            )}
+            {cls.isAdmin && (
+              <button
+                onClick={handleDelete}
+                disabled={pending}
+                className="text-sm text-red-600 hover:text-red-800 px-3 font-semibold"
+                title="Admin only — permanently delete this class for testing"
+              >
+                Delete Class
               </button>
             )}
           </div>
@@ -417,6 +491,9 @@ export function ClassDetailView({ cls, students }: { cls: ClassInfo; students: S
               {cls.isActive && (
                 <span className="text-xs font-bold bg-green-100 text-green-700 px-2 py-1 rounded-lg">ACTIVE</span>
               )}
+              {cls.isPlanning && !cls.isActive && (
+                <span className="text-xs font-bold bg-purple-100 text-purple-700 px-2 py-1 rounded-lg">PLANNING</span>
+              )}
               {cls.archivedAt && (
                 <span className="text-xs font-bold bg-gray-100 text-gray-500 px-2 py-1 rounded-lg">ARCHIVED</span>
               )}
@@ -430,6 +507,13 @@ export function ClassDetailView({ cls, students }: { cls: ClassInfo; students: S
           </div>
 
           <div className="flex gap-2">
+            <a
+              href={`/api/export/class-gradebooks/${cls.id}`}
+              className="btn-secondary text-sm px-3 py-2"
+              title="Download every student's gradebook as a zip of Excel files"
+            >
+              ⬇ Gradebooks (.zip)
+            </a>
             <Link href={`/portal/academic-schedule?classId=${cls.id}`} className="btn-secondary text-sm px-3 py-2">
               Schedule
             </Link>

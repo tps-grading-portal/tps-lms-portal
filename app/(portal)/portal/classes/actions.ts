@@ -71,14 +71,58 @@ export async function updateClassAction(classId: string, data: {
   startDate:         string | null
   endDate:           string | null
   isActive:          boolean
+  isPlanning:        boolean
   deactivateClassId?: string | null
+  studentKeepUserIds?: string[] | null  // when deactivating: students who keep access
 }) {
   const user = await requireAuth()
   if (!can(user.role, 'manage:classes')) return { error: 'Insufficient permissions' }
 
+  const current = await db.class.findUnique({
+    where:  { id: classId },
+    select: { isActive: true },
+  })
+  if (!current) return { error: 'Class not found.' }
+
   if (data.isActive) {
     const limit = await checkActiveLimit(classId, data.deactivateClassId ?? null)
     if (!limit.ok) return { needsDeactivation: limit.activeClasses }
+  }
+
+  // Deactivating a class (e.g. graduation): student access goes inactive too,
+  // unless specific students are kept. Prompt first.
+  if (current.isActive && !data.isActive) {
+    const studentsWithAccess = await db.student.findMany({
+      where:  { classId, userId: { not: null }, userAccount: { isActive: true } },
+      select: { userId: true, firstName: true, lastName: true },
+      orderBy: { lastName: 'asc' },
+    })
+    if (studentsWithAccess.length > 0 && data.studentKeepUserIds == null) {
+      // Caller hasn't decided yet — ask which students keep access
+      return {
+        needsStudentDecision: studentsWithAccess.map(s => ({
+          userId: s.userId!,
+          name:   `${s.lastName}, ${s.firstName}`.trim(),
+        })),
+      }
+    }
+    const keep = new Set(data.studentKeepUserIds ?? [])
+    const toDeactivate = studentsWithAccess.filter(s => !keep.has(s.userId!)).map(s => s.userId!)
+    if (toDeactivate.length > 0) {
+      await db.user.updateMany({
+        where: { id: { in: toDeactivate } },
+        data:  { isActive: false },
+      })
+      await db.auditLog.create({
+        data: {
+          userId:     user.id,
+          action:     'DEACTIVATE_CLASS_STUDENTS',
+          targetId:   classId,
+          targetType: 'Class',
+          metadata:   { deactivated: toDeactivate.length, kept: keep.size },
+        },
+      })
+    }
   }
 
   await db.class.update({
@@ -88,11 +132,56 @@ export async function updateClassAction(classId: string, data: {
       startDate:     data.startDate ? new Date(data.startDate) : null,
       endDate:       data.endDate ? new Date(data.endDate) : null,
       isActive:      data.isActive,
+      isPlanning:    data.isPlanning,
     },
   })
 
   revalidatePath('/portal/classes')
   revalidatePath(`/portal/classes/${classId}`)
+  return { ok: true }
+}
+
+// ── Delete class (admin only — for system testing) ────────────────────────────
+
+export async function deleteClassAction(classId: string) {
+  const user = await requireAuth()
+  if (user.role !== 'SYSTEM_ADMIN') return { error: 'Only a system admin can delete a class.' }
+
+  const cls = await db.class.findUnique({ where: { id: classId }, select: { name: true } })
+  if (!cls) return { error: 'Class not found.' }
+
+  try {
+    // Remove dependents that don't cascade from the class
+    await db.$transaction([
+      db.contentVerification.deleteMany({ where: { classId } }),
+      db.surveyResponseV2.deleteMany({ where: { deployment: { classId } } }),
+      db.surveySanitizedReport.deleteMany({ where: { deployment: { classId } } }),
+      db.surveyDeployment.deleteMany({ where: { classId } }),
+      db.gradingSession.deleteMany({ where: { classId } }),
+      db.studentSurveyResponse.deleteMany({ where: { classId } }),
+      db.instructorSurveyResponse.deleteMany({ where: { classId } }),
+      db.surveyQuestionTemplate.deleteMany({ where: { classId } }),
+      db.criterion.deleteMany({ where: { classId } }),
+      db.chatChannel.deleteMany({ where: { classId } }),
+      db.flightScheduleEntry.deleteMany({ where: { classId } }),
+      // Students / schedules / weeks / lesson pages / access cascade from Class
+      db.class.delete({ where: { id: classId } }),
+    ])
+  } catch (err) {
+    console.error('deleteClassAction:', err)
+    return { error: 'Delete failed — the class has linked records that could not be removed automatically.' }
+  }
+
+  await db.auditLog.create({
+    data: {
+      userId:     user.id,
+      action:     'DELETE_CLASS',
+      targetType: 'Class',
+      metadata:   { className: cls.name, classId },
+    },
+  })
+
+  revalidatePath('/portal/classes')
   return { ok: true }
 }
 

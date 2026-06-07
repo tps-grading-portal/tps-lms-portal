@@ -66,6 +66,8 @@ export default async function ClassDetailPage({ params }: { params: Promise<{ cl
           startDate:     cls.startDate?.toISOString() ?? null,
           endDate:       cls.endDate?.toISOString() ?? null,
           isActive:      cls.isActive,
+          isPlanning:    cls.isPlanning,
+          isAdmin:       session.user.role === 'SYSTEM_ADMIN',
           archivedAt:    cls.archivedAt?.toISOString() ?? null,
           scheduledEventCount: cls._count.scheduledEvents,
         }}

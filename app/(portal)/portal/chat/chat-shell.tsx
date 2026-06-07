@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { upload } from '@vercel/blob/client'
 import type { ChannelSummary, ChatAttachment } from './actions'
 import {
-  sendMessageAction,
+  sendMessageAction, markChannelReadAction,
   createChannelAction, archiveChannelAction, getChatMemberOptionsAction,
 } from './actions'
 import type { UserRole } from '@prisma/client'
@@ -515,6 +515,9 @@ export function ChatShell({ channels, currentUserId, className, classId }: Props
 
     setMessages([])
     latestSince.current = null
+
+    // Viewing a channel clears its unread state
+    markChannelReadAction(activeChannelId)
 
     // Load last ~50 messages (no `since` = full initial load)
     fetchMessages(activeChannelId, null)

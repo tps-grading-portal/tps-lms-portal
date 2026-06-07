@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth'
 import { can } from '@/lib/permissions'
 import { redirect } from 'next/navigation'
 import { db } from '@/lib/db'
+import { QuickReset } from './quick-reset'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'User Management' }
@@ -48,6 +49,7 @@ export default async function UsersPage() {
               <th className="text-left px-4 py-3 font-semibold text-gray-700">Role</th>
               <th className="text-left px-4 py-3 font-semibold text-gray-700">Status</th>
               <th className="text-left px-4 py-3 font-semibold text-gray-700">Last Login</th>
+              <th className="text-right px-4 py-3 font-semibold text-gray-700">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -75,6 +77,9 @@ export default async function UsersPage() {
                   {u.lastLoginAt
                     ? new Date(u.lastLoginAt).toLocaleDateString()
                     : 'Never'}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <QuickReset userId={u.id} name={`${u.firstName} ${u.lastName}`.trim()} email={u.email} />
                 </td>
               </tr>
             ))}

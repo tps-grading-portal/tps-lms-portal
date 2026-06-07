@@ -2,10 +2,33 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { can, PORTAL_NAV, type Permission } from '@/lib/permissions'
 import type { UserRole } from '@prisma/client'
+
+/** Polls the chat unread count for the sidebar badge. */
+function useChatUnread(): number {
+  const [unread, setUnread] = useState(0)
+  const pathname = usePathname()
+
+  useEffect(() => {
+    let live = true
+    async function load() {
+      try {
+        const res = await fetch('/api/chat/unread')
+        if (!res.ok) return
+        const data = await res.json()
+        if (live) setUnread(data.unread ?? 0)
+      } catch { /* retry next poll */ }
+    }
+    load()
+    const interval = setInterval(load, 30_000)
+    return () => { live = false; clearInterval(interval) }
+  }, [pathname]) // refresh when navigating (e.g. leaving the chat page)
+
+  return unread
+}
 
 // Icon map — uses Heroicons-style SVG paths (inline, no external dep)
 const ICONS: Record<string, React.ReactNode> = {
@@ -71,7 +94,7 @@ const ICONS: Record<string, React.ReactNode> = {
   ),
 }
 
-function SidebarLink({ href, label, icon }: { href: string; label: string; icon: string }) {
+function SidebarLink({ href, label, icon, badge }: { href: string; label: string; icon: string; badge?: number }) {
   const pathname = usePathname()
   const isActive = href === '/portal/dashboard'
     ? pathname === '/portal/dashboard'
@@ -88,13 +111,19 @@ function SidebarLink({ href, label, icon }: { href: string; label: string; icon:
       )}
     >
       <span className="shrink-0">{ICONS[icon] ?? ICONS.home}</span>
-      {label}
+      <span className="flex-1">{label}</span>
+      {badge !== undefined && badge > 0 && (
+        <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-tps-orange text-white text-[10px] font-bold flex items-center justify-center">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </Link>
   )
 }
 
 export function PortalSidebar({ role }: { role: UserRole }) {
   const [open, setOpen] = useState(false)
+  const chatUnread = useChatUnread()
 
   // Invisible Access Control — only render nav items the user can access
   const visibleItems = PORTAL_NAV.filter(item =>
@@ -104,7 +133,13 @@ export function PortalSidebar({ role }: { role: UserRole }) {
   const nav = (
     <nav className="space-y-0.5 p-3">
       {visibleItems.map(item => (
-        <SidebarLink key={item.href} href={item.href} label={item.label} icon={item.icon} />
+        <SidebarLink
+          key={item.href}
+          href={item.href}
+          label={item.label}
+          icon={item.icon}
+          badge={item.href === '/portal/chat' ? chatUnread : undefined}
+        />
       ))}
     </nav>
   )

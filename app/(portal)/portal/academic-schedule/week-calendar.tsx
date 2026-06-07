@@ -14,10 +14,11 @@ const ROWS          = (DAY_END_MIN - DAY_START_MIN) / SLOT_MIN
 const DAY_LABELS_5 = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
 const DAY_LABELS_7 = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-// Visual distinction between the two active classes
+// Visual distinction between active + planning classes
 const CLASS_COLORS = [
-  { block: 'bg-blue-100 border-blue-500 text-blue-900',   chip: 'bg-blue-600 text-white' },
-  { block: 'bg-amber-100 border-amber-500 text-amber-900', chip: 'bg-amber-500 text-white' },
+  { block: 'bg-blue-100 border-blue-500 text-blue-900',       chip: 'bg-blue-600 text-white' },
+  { block: 'bg-amber-100 border-amber-500 text-amber-900',     chip: 'bg-amber-500 text-white' },
+  { block: 'bg-purple-100 border-purple-500 text-purple-900',  chip: 'bg-purple-600 text-white' },
 ]
 
 function toMinutes(hhmm: string): number {
@@ -48,11 +49,11 @@ type ConflictPrompt = {
 }
 
 export function WeekCalendar({
-  weekStartISO, events, showTwoClasses, days, canEdit, onSlotClick, onEventClick, onExternalDrop,
+  weekStartISO, events, laneCount, days, canEdit, onSlotClick, onEventClick, onExternalDrop,
 }: {
   weekStartISO:   string               // Monday of the visible week (YYYY-MM-DD)
   events:         ScheduledEventRow[]  // merged events of all visible classes, any class
-  showTwoClasses: boolean
+  laneCount:      number               // visible classes — day columns split into lanes
   days:           5 | 7                // weekend toggle
   canEdit:        boolean
   onSlotClick:    (dateISO: string, time: string) => void
@@ -236,13 +237,15 @@ export function WeekCalendar({
                   const height = Math.max(SLOT_PX, (durMin / SLOT_MIN) * SLOT_PX)
                   const colors = CLASS_COLORS[e.classColorIdx % CLASS_COLORS.length]
 
-                  // With two classes on the calendar, split each day column:
-                  // class 0 on the left half, class 1 on the right — both
-                  // visible even at the same time.
-                  const lane: React.CSSProperties = showTwoClasses
-                    ? e.classColorIdx % 2 === 0
-                      ? { left: 2, width: 'calc(50% - 3px)' }
-                      : { left: 'calc(50% + 1px)', width: 'calc(50% - 3px)' }
+                  // With multiple classes on the calendar, split each day
+                  // column into lanes so concurrent events stay visible.
+                  const lanes = Math.max(1, laneCount)
+                  const laneIdx = e.classColorIdx % lanes
+                  const lane: React.CSSProperties = lanes > 1
+                    ? {
+                        left:  `calc(${(laneIdx / lanes) * 100}% + 2px)`,
+                        width: `calc(${100 / lanes}% - 4px)`,
+                      }
                     : { left: 2, right: 2 }
 
                   return (
@@ -270,7 +273,7 @@ export function WeekCalendar({
                       }}
                     >
                       <div className="flex items-center gap-1">
-                        {showTwoClasses && (
+                        {laneCount > 1 && (
                           <span className={`text-[8px] font-bold px-1 rounded ${colors.chip}`}>{e.className}</span>
                         )}
                         <p className="text-[10px] font-bold font-mono leading-tight truncate">

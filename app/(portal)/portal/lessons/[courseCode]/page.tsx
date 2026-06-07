@@ -51,29 +51,38 @@ function toFileRow(f: RawFile): FileRow {
   }
 }
 
-export default async function LessonPage({ params }: { params: Promise<{ courseCode: string }> }) {
+export default async function LessonPage({
+  params, searchParams,
+}: {
+  params: Promise<{ courseCode: string }>
+  searchParams: Promise<{ classId?: string }>
+}) {
   const session = await auth()
   if (!session?.user) redirect('/login')
 
   const { courseCode } = await params
+  const { classId } = await searchParams
   const decoded = decodeURIComponent(courseCode)
 
-  const data = await getLessonPageAction(decoded)
+  const data = await getLessonPageAction(decoded, classId)
   if (!data.event) notFound()
   const { event, studentContext } = data
+  const lesson       = 'lessonPage' in data ? data.lessonPage : null
+  const schedules    = 'schedules' in data ? data.schedules : []
+  const viewClassId  = 'viewClassId' in data ? data.viewClassId : null
+  const viewClassName = 'viewClassName' in data ? data.viewClassName : null
+  const classOptions = 'classOptions' in data ? data.classOptions : []
   const canAuthor = 'canAuthor' in data ? data.canAuthor : false
   const canUpload = 'canUpload' in data ? data.canUpload : false
   const isStudent = 'isStudent' in data ? data.isStudent : false
 
-  const schedule  = event.schedules[0] ?? null
-  const lesson    = event.lessonPage
   const objectives: string[] = Array.isArray(lesson?.learningObjectives)
     ? (lesson.learningObjectives as string[])
     : []
 
   const statusMeta = studentContext ? STATUS_STYLES[studentContext.status] : null
 
-  // Students only see A9-approved (VAULT) files
+  // Students only see fully approved (VAULT) files
   const visibleFile = (f: RawFile) => !isStudent || f.contentFile.status === 'VAULT'
 
   const allFiles: RawFile[] = (lesson?.files ?? []) as RawFile[]
@@ -103,6 +112,28 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
         <span className="text-gray-700 font-medium">{event.courseCode}</span>
       </div>
 
+      {/* Class tabs — each cohort keeps its own page, times, and material */}
+      {!isStudent && classOptions.length > 1 && (
+        <div className="flex gap-1 flex-wrap">
+          {classOptions.map(c => (
+            <Link
+              key={c.id}
+              href={`/portal/lessons/${encodeURIComponent(event.courseCode)}?classId=${c.id}`}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
+                c.id === viewClassId
+                  ? 'bg-tps-navy text-white'
+                  : 'bg-white border border-gray-200 text-gray-600 hover:border-tps-orange hover:text-tps-orange'
+              }`}
+            >
+              {c.name}
+              {c.isPlanning && !c.isActive && (
+                <span className="ml-1.5 text-[10px] font-normal opacity-70">(planning)</span>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
+
       {/* Header card */}
       <div className="card bg-tps-navy text-white space-y-3">
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -111,11 +142,16 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
               <span className="text-xs font-bold tracking-widest text-white/60 uppercase">
                 {event.deptCode}
               </span>
+              {viewClassName && (
+                <span className="text-xs bg-tps-orange/80 rounded px-2 py-0.5 font-bold">
+                  Class {viewClassName}
+                </span>
+              )}
               <span className="text-xs bg-white/10 rounded px-2 py-0.5 font-mono">
                 {SUFFIX_LABELS[event.eventSuffix] ?? event.eventSuffix}
               </span>
               {event.isGraded && (
-                <span className="text-xs bg-tps-orange/80 rounded px-2 py-0.5 font-semibold">Graded</span>
+                <span className="text-xs bg-white/20 rounded px-2 py-0.5 font-semibold">Graded</span>
               )}
               {event.isCompOral && (
                 <span className="text-xs bg-amber-400/80 text-tps-navy rounded px-2 py-0.5 font-bold">Comp Oral</span>
@@ -138,23 +174,30 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
           )}
         </div>
 
-        {/* Schedule info */}
-        {schedule && (
-          <div className="flex flex-wrap gap-4 text-sm text-white/70 pt-2 border-t border-white/10">
-            {schedule.academicWeek && (
-              <span>Week {schedule.academicWeek.weekNumber} · {schedule.academicWeek.label}</span>
-            )}
-            {schedule.scheduledDate && (
-              <span>{new Date(schedule.scheduledDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
-            )}
-            {schedule.scheduledTime && <span>{schedule.scheduledTime}</span>}
-            {schedule.locationRoom && <span>{schedule.locationRoom}</span>}
-            {schedule.durationMinutes && <span>{schedule.durationMinutes} min</span>}
-            {schedule.instructor && (
-              <span className="text-white/90 font-medium">
-                Instructor: {schedule.instructor.firstName} {schedule.instructor.lastName}
-              </span>
-            )}
+        {/* This class's schedule — all sessions */}
+        {schedules.length > 0 && (
+          <div className="space-y-1 pt-2 border-t border-white/10">
+            {schedules.map((s, i) => (
+              <div key={s.id} className="flex flex-wrap gap-4 text-sm text-white/70">
+                {schedules.length > 1 && (
+                  <span className="text-white/50 font-semibold">Day {i + 1}</span>
+                )}
+                {s.academicWeek && (
+                  <span>Week {s.academicWeek.weekNumber}</span>
+                )}
+                {s.scheduledDate && (
+                  <span>{new Date(s.scheduledDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                )}
+                {s.scheduledTime && <span>{s.scheduledTime}</span>}
+                {s.locationRoom && <span>{s.locationRoom}</span>}
+                {s.durationMinutes && <span>{s.durationMinutes} min</span>}
+                {s.instructor && (
+                  <span className="text-white/90 font-medium">
+                    Instructor: {s.instructor.firstName} {s.instructor.lastName}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -193,15 +236,20 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
       )}
 
       {/* Course documents + lessons (uploads, TLO/PLO, materials) */}
-      <CourseContent
-        syllabusEventId={event.id}
-        courseFiles={courseFiles}
-        lessons={lessons}
-        canAuthor={canAuthor}
-        canUpload={canUpload && !isStudent}
-        canApproveDirect={['A9_STANDARDS', 'DEAN_COMMANDER', 'SYSTEM_ADMIN'].includes(session.user.role)}
-        isStudent={isStudent}
-      />
+      {viewClassId && (
+        <CourseContent
+          syllabusEventId={event.id}
+          classId={viewClassId}
+          viewClassName={viewClassName ?? ''}
+          classOptions={classOptions.map(c => ({ id: c.id, name: c.name, isPlanning: c.isPlanning, isActive: c.isActive }))}
+          courseFiles={courseFiles}
+          lessons={lessons}
+          canAuthor={canAuthor}
+          canUpload={canUpload && !isStudent}
+          canApproveDirect={['A9_STANDARDS', 'DEAN_COMMANDER', 'SYSTEM_ADMIN'].includes(session.user.role)}
+          isStudent={isStudent}
+        />
+      )}
 
       {/* Prerequisites — editable by scoped roles */}
       <PrereqEditor
@@ -231,10 +279,11 @@ export default async function LessonPage({ params }: { params: Promise<{ courseC
       )}
 
       {/* Course-level editor — scoped authority only */}
-      {canAuthor && (
+      {canAuthor && viewClassId && (
         <section>
           <LessonEditor
             syllabusEventId={event.id}
+            classId={viewClassId}
             initial={{
               overview:           lesson?.overview ?? '',
               learningObjectives: objectives,

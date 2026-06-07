@@ -238,6 +238,18 @@ export async function sendMessageAction(
   return { ok: true }
 }
 
+// ── Mark a channel read (clears the unread badge) ─────────────────────────────
+
+export async function markChannelReadAction(channelId: string) {
+  const user = await requireAuth()
+  await db.chatChannelMember.upsert({
+    where:  { channelId_userId: { channelId, userId: user.id } },
+    create: { channelId, userId: user.id, lastReadAt: new Date() },
+    update: { lastReadAt: new Date() },
+  })
+  return { ok: true }
+}
+
 // ── Upload a chat attachment (image or document) ─────────────────────────────
 
 export async function uploadChatAttachmentAction(formData: FormData): Promise<

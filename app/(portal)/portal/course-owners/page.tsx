@@ -4,6 +4,7 @@ import { auth } from '@/lib/auth'
 import { can } from '@/lib/permissions'
 import { db } from '@/lib/db'
 import { deptSortIndex, deptLabel } from '@/lib/mcg-departments'
+import { QuickAssign } from './quick-assign'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Course Owners' }
@@ -13,7 +14,7 @@ export default async function CourseOwnersPage() {
   if (!session?.user) redirect('/login')
   if (!can(session.user.role, 'manage:users')) return null
 
-  const [events, assignments, chairs] = await Promise.all([
+  const [events, assignments, chairs, staff] = await Promise.all([
     db.syllabusEvent.findMany({
       where:   { isActive: true },
       orderBy: { courseCode: 'asc' },
@@ -25,7 +26,14 @@ export default async function CourseOwnersPage() {
     db.userDepartment.findMany({
       include: { user: { select: { id: true, firstName: true, lastName: true, role: true, isActive: true } } },
     }),
+    db.user.findMany({
+      where:   { isActive: true, role: { in: ['LINE_INSTRUCTOR', 'GUEST_INSTRUCTOR', 'DEPT_CHAIR', 'ADO', 'DO'] } },
+      orderBy: { lastName: 'asc' },
+      select:  { id: true, firstName: true, lastName: true },
+    }),
   ])
+
+  const staffOptions = staff.map(s => ({ id: s.id, name: `${s.lastName}, ${s.firstName}`.trim() }))
 
   type Owner = { id: string; name: string; via: string }
 
@@ -143,22 +151,7 @@ export default async function CourseOwnersPage() {
                       </td>
                       <td className="px-4 py-2 text-gray-700">{r.title}</td>
                       <td className="px-4 py-2 text-right">
-                        {r.owners.length === 0 ? (
-                          <span className="text-xs font-semibold text-amber-600">No owner</span>
-                        ) : (
-                          <span className="text-xs text-gray-500">
-                            {r.owners.slice(0, 3).map((o, i) => (
-                              <span key={o.id}>
-                                {i > 0 && ', '}
-                                <Link href={`/portal/users/${o.id}`} className="hover:underline text-tps-navy">
-                                  {o.name}
-                                </Link>
-                                <span className="text-gray-300"> ({o.via})</span>
-                              </span>
-                            ))}
-                            {r.owners.length > 3 && ` +${r.owners.length - 3}`}
-                          </span>
-                        )}
+                        <QuickAssign eventId={r.id} owners={r.owners} staff={staffOptions} />
                       </td>
                     </tr>
                   ))}

@@ -346,6 +346,7 @@ model Class {
   startDate         DateTime?
   endDate           DateTime?
   isActive          Boolean   @default(false)
+  isPlanning        Boolean   @default(false) // "Active for Planning" — schedulable + course sites, not yet grading
   isCompOralCurrent Boolean   @default(false)
   createdAt         DateTime  @default(now())
   archivedAt        DateTime?
@@ -363,6 +364,7 @@ model Class {
   chatChannels          ChatChannel[]
   flightScheduleEntries FlightScheduleEntry[]
   surveyDeployments     SurveyDeployment[]
+  lessonPages           LessonPage[]
 
   @@map("classes")
 }
@@ -457,7 +459,7 @@ model SyllabusEvent {
   contentFiles     ContentFile[]
   curriculumWeights CurriculumWeight[]
   surveyDeployments SurveyDeployment[]
-  lessonPage       LessonPage?
+  lessonPages      LessonPage[]
   courseAssignments CourseAssignment[]
 
   @@map("syllabus_events")
@@ -645,10 +647,12 @@ model ContentVerification {
 // ── LESSON PAGES ────────────────────────────────────────────
 // ============================================================
 
-// Structured lesson portal page per SyllabusEvent
+// Structured lesson portal page per SyllabusEvent **per class** — the two
+// active cohorts keep separate content, timelines, and approvals.
 model LessonPage {
   id                 String    @id @default(cuid())
-  syllabusEventId    String    @unique
+  syllabusEventId    String
+  classId            String?   // null only for legacy/master pages
   authorId           String
   overview           String?   @db.Text
   learningObjectives Json?     // string[]
@@ -660,11 +664,13 @@ model LessonPage {
   updatedAt          DateTime  @updatedAt
 
   syllabusEvent SyllabusEvent      @relation(fields: [syllabusEventId], references: [id], onDelete: Cascade)
+  class         Class?             @relation(fields: [classId],         references: [id], onDelete: Cascade)
   author        User               @relation(fields: [authorId],        references: [id])
   files         LessonPageFile[]
   lessons       Lesson[]
   studentViews  StudentLessonView[]
 
+  @@unique([syllabusEventId, classId])
   @@map("lesson_pages")
 }
 

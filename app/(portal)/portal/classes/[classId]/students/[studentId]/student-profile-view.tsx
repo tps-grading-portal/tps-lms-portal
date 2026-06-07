@@ -170,11 +170,22 @@ export function StudentProfileView({
             <h1 className="text-2xl font-bold mt-0.5">{student.firstName} {student.lastName}</h1>
             {student.email && <p className="text-white/70 text-sm mt-0.5">{student.email}</p>}
           </div>
-          {canManage && (
-            <button onClick={() => setEditOpen(true)} className="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg transition-colors">
-              Edit
-            </button>
-          )}
+          <div className="flex gap-2">
+            {(canManage || canGrade) && (
+              <a
+                href={`/api/export/student/${student.id}`}
+                className="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                title="Download this student's full gradebook as Excel"
+              >
+                ⬇ Gradebook (.xlsx)
+              </a>
+            )}
+            {canManage && (
+              <button onClick={() => setEditOpen(true)} className="bg-white/10 hover:bg-white/20 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+                Edit
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

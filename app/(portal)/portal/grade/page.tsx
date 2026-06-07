@@ -1,12 +1,13 @@
 import { requirePermission } from '@/lib/server-auth'
 import { getGradeQueueAction } from './actions'
 import { GradeQueue } from './grade-queue'
+import { GradesTabs } from '@/components/portal/grades-tabs'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Grading Queue' }
 
 export default async function GradePage() {
-  await requirePermission('grade:enter')
+  const user = await requirePermission('grade:enter')
 
   const { entries, classNames } = await getGradeQueueAction()
 
@@ -24,14 +25,16 @@ export default async function GradePage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-tps-navy">Grading Queue</h1>
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold text-tps-navy">Grades</h1>
         <p className="text-gray-500 text-sm">
           {classNames.length === 1 ? `Class ${classNames[0]}` : `Classes ${classNames.join(', ')}`}
           {' '}· {entries.length} grade sheet{entries.length !== 1 ? 's' : ''}
           {' '}· Tap &quot;Grade&quot; or scan QR code to open on any device
         </p>
       </div>
+
+      <GradesTabs role={user.role} />
 
       <GradeQueue entries={entries} />
     </div>

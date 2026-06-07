@@ -3,6 +3,7 @@ import { can } from '@/lib/permissions'
 import { redirect } from 'next/navigation'
 import { db } from '@/lib/db'
 import { computeClassAnalytics } from '@/lib/analytics'
+import { GradesTabs } from '@/components/portal/grades-tabs'
 import type { Metadata } from 'next'
 import type { AlertSeverity } from '@prisma/client'
 
@@ -58,6 +59,8 @@ export default async function AnalyticsPage({
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      <GradesTabs role={role} />
+
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-tps-navy">Analytics</h1>

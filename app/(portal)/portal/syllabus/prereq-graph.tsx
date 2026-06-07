@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import type { RoadmapEvent } from './actions'
 import type { SyllabusEventStatus } from '@prisma/client'
 
@@ -56,8 +55,8 @@ function computeLevels(events: RoadmapEvent[]): Map<string, number> {
  * unlocks. Click a node to open its course page; hover highlights its web.
  */
 export function PrereqGraph({ events }: { events: RoadmapEvent[] }) {
-  const router = useRouter()
-  const [hoverId, setHoverId] = useState<string | null>(null)
+  const [hoverId,    setHoverId]    = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const { nodes, edges, width, height } = useMemo(() => {
     const levels = computeLevels(events)
@@ -112,29 +111,40 @@ export function PrereqGraph({ events }: { events: RoadmapEvent[] }) {
     }
   }, [events])
 
-  // Connected web of the hovered node: its ancestors + descendants edges
+  // Selected: trace the path FROM the beginning TO this course (ancestors
+  // only) — fades everything else so the route is easy to follow.
+  // Hover (when nothing is selected): the full connected web both directions.
   const highlight = useMemo(() => {
-    if (!hoverId) return null
-    const connectedEdges = new Set<number>()
-    const connectedNodes = new Set<string>([hoverId])
+    const focusId = selectedId ?? hoverId
+    if (!focusId) return null
 
-    // Walk ancestors (edges feeding connected nodes) and descendants
-    // (edges leaving connected nodes) until stable — graphs are small.
+    const connectedEdges = new Set<number>()
+    const connectedNodes = new Set<string>([focusId])
+    const ancestorsOnly = selectedId !== null
+
     let changed = true
     while (changed) {
       changed = false
       edges.forEach((edge, i) => {
         const fromId = edge.from.event.id
         const toId   = edge.to.event.id
-        if ((connectedNodes.has(toId) || connectedNodes.has(fromId)) && !connectedEdges.has(i)) {
-          connectedEdges.add(i)
-          if (!connectedNodes.has(fromId)) { connectedNodes.add(fromId); changed = true }
-          if (!connectedNodes.has(toId))   { connectedNodes.add(toId);   changed = true }
+        if (ancestorsOnly) {
+          // Only walk backwards: edges that feed a connected node
+          if (connectedNodes.has(toId) && !connectedEdges.has(i)) {
+            connectedEdges.add(i)
+            if (!connectedNodes.has(fromId)) { connectedNodes.add(fromId); changed = true }
+          }
+        } else {
+          if ((connectedNodes.has(toId) || connectedNodes.has(fromId)) && !connectedEdges.has(i)) {
+            connectedEdges.add(i)
+            if (!connectedNodes.has(fromId)) { connectedNodes.add(fromId); changed = true }
+            if (!connectedNodes.has(toId))   { connectedNodes.add(toId);   changed = true }
+          }
         }
       })
     }
     return { edges: connectedEdges, nodes: connectedNodes }
-  }, [hoverId, edges])
+  }, [selectedId, hoverId, edges])
 
   if (events.length === 0) {
     return <div className="card text-center py-10 text-gray-400">No events match your filters.</div>
@@ -173,19 +183,22 @@ export function PrereqGraph({ events }: { events: RoadmapEvent[] }) {
             <g
               key={node.event.id}
               transform={`translate(${node.x}, ${node.y})`}
-              opacity={dimmed ? 0.25 : 1}
+              opacity={dimmed ? 0.15 : 1}
               className="cursor-pointer"
               onMouseEnter={() => setHoverId(node.event.id)}
               onMouseLeave={() => setHoverId(null)}
-              onClick={() => router.push(`/portal/lessons/${encodeURIComponent(node.event.courseCode)}`)}
+              onClick={() =>
+                // First click traces the path to this course; second click clears
+                setSelectedId(prev => (prev === node.event.id ? null : node.event.id))
+              }
             >
               <rect
                 width={NODE_W}
                 height={NODE_H}
                 rx={8}
                 fill={colors.fill}
-                stroke={isHl && hoverId === node.event.id ? '#f97316' : colors.stroke}
-                strokeWidth={isHl && hoverId === node.event.id ? 2.5 : 1.5}
+                stroke={selectedId === node.event.id || (isHl && hoverId === node.event.id) ? '#f97316' : colors.stroke}
+                strokeWidth={selectedId === node.event.id ? 3 : isHl && hoverId === node.event.id ? 2.5 : 1.5}
               />
               <text x={NODE_W / 2} y={17} textAnchor="middle" className="font-mono" fontSize={11} fontWeight={700} fill="#1e2a44">
                 {node.event.courseCode}
@@ -199,7 +212,9 @@ export function PrereqGraph({ events }: { events: RoadmapEvent[] }) {
       </svg>
 
       <div className="sticky left-0 px-4 py-2 border-t border-gray-100 text-[10px] text-gray-400 bg-white">
-        Each course connects forward to everything it unlocks · hover a course to isolate its web · click to open the course page
+        {selectedId
+          ? 'Showing the trace from the beginning to the selected course — click it again to show all flows'
+          : 'Hover to preview a course’s web · click a course to trace the path from the beginning to it'}
       </div>
     </div>
   )

@@ -65,13 +65,13 @@ export async function getScheduleDataAction(classId?: string) {
 
   const classes = await db.class.findMany({
     where:   { archivedAt: null },
-    orderBy: [{ isActive: 'desc' }, { name: 'desc' }],
-    select:  { id: true, name: true, isActive: true, startDate: true, endDate: true },
+    orderBy: [{ isActive: 'desc' }, { isPlanning: 'desc' }, { name: 'desc' }],
+    select:  { id: true, name: true, isActive: true, isPlanning: true, startDate: true, endDate: true },
   })
 
-  // Both active classes appear on the calendar; the "panel class" (toggle)
-  // dictates which class new events are scheduled into.
-  const activeClasses = classes.filter(c => c.isActive)
+  // Active + active-for-planning classes appear on the calendar; the "panel
+  // class" (toggle) dictates which class new events are scheduled into.
+  const activeClasses = classes.filter(c => c.isActive || c.isPlanning)
   const selectedClass = classId
     ? classes.find(c => c.id === classId) ?? activeClasses[0] ?? classes[0]
     : activeClasses[0] ?? classes[0]
@@ -109,7 +109,7 @@ export async function getScheduleDataAction(classId?: string) {
           select: {
             id: true, courseCode: true, title: true, deptCode: true, phase: true,
             tracks: true, isGraded: true,
-            lessonPage: { select: { id: true, isPublished: true } },
+            lessonPages: { select: { id: true, isPublished: true, classId: true } },
           },
         },
         instructor: { select: { id: true, firstName: true, lastName: true } },
@@ -151,8 +151,8 @@ export async function getScheduleDataAction(classId?: string) {
     phase:           s.syllabusEvent.phase,
     tracks:          s.syllabusEvent.tracks,
     isGraded:        s.syllabusEvent.isGraded,
-    hasLessonPage:   !!s.syllabusEvent.lessonPage,
-    lessonPublished: s.syllabusEvent.lessonPage?.isPublished ?? false,
+    hasLessonPage:   s.syllabusEvent.lessonPages.some(p => p.classId === s.classId),
+    lessonPublished: s.syllabusEvent.lessonPages.find(p => p.classId === s.classId)?.isPublished ?? false,
     scheduledDate:   s.scheduledDate?.toISOString() ?? null,
     scheduledTime:   s.scheduledTime,
     durationMinutes: s.durationMinutes,
@@ -206,9 +206,10 @@ export async function getScheduleDataAction(classId?: string) {
       const cls = classes.find(c => c.id === id)
       return {
         id,
-        name:      classNameById.get(id) ?? '',
-        colorIdx:  colorIdxByClass.get(id) ?? 0,
-        startDate: cls?.startDate?.toISOString().slice(0, 10) ?? null,
+        name:       classNameById.get(id) ?? '',
+        colorIdx:   colorIdxByClass.get(id) ?? 0,
+        startDate:  cls?.startDate?.toISOString().slice(0, 10) ?? null,
+        isPlanning: (cls?.isPlanning && !cls?.isActive) ?? false,
       }
     }),
     selectedClassId: selectedClass.id,

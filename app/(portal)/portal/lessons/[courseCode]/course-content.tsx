@@ -6,6 +6,7 @@ import { upload } from '@vercel/blob/client'
 import {
   registerCourseContentAction, replaceContentFileAction, approveForStudentsAction,
   saveLessonAction, deleteLessonAction, detachFileFromLessonAction,
+  duplicateCourseContentAction,
 } from './actions'
 import { advanceContentAction } from '../../vault/actions'
 
@@ -51,6 +52,9 @@ export type LessonRow = {
 
 type Props = {
   syllabusEventId:  string
+  classId:          string      // the class whose page this is
+  viewClassName:    string
+  classOptions:     { id: string; name: string; isPlanning: boolean; isActive: boolean }[]
   courseFiles:      FileRow[]   // course-wide materials (lessonId null)
   lessons:          LessonRow[]
   canAuthor:        boolean     // scoped content authority (edit lessons/prereqs)
@@ -214,9 +218,10 @@ function FileItem({
 // ── Upload control ────────────────────────────────────────────────────────────
 
 function UploadButton({
-  syllabusEventId, lessonId, label,
+  syllabusEventId, classId, lessonId, label,
 }: {
   syllabusEventId: string
+  classId:         string
   lessonId:        string | null
   label:           string
 }) {
@@ -235,6 +240,7 @@ function UploadButton({
         const blob = await uploadToBlob(file)
         const result = await registerCourseContentAction({
           syllabusEventId,
+          classId,
           lessonId,
           title: file.name.replace(/\.[^.]+$/, ''),
           blob,
@@ -310,9 +316,10 @@ function ListEditor({
 }
 
 function LessonModal({
-  syllabusEventId, lesson, onClose,
+  syllabusEventId, classId, lesson, onClose,
 }: {
   syllabusEventId: string
+  classId:         string
   lesson:          LessonRow | null   // null = new
   onClose:         () => void
 }) {
@@ -329,7 +336,7 @@ function LessonModal({
   function handleSave() {
     setError(null)
     startTx(async () => {
-      const result = await saveLessonAction(syllabusEventId, {
+      const result = await saveLessonAction(syllabusEventId, classId, {
         lessonId: lesson?.id ?? null,
         title, overview, outline,
         tlos: tlos.filter(t => t.trim()),
@@ -409,11 +416,29 @@ function LessonModal({
 // ── Main course content ───────────────────────────────────────────────────────
 
 export function CourseContent({
-  syllabusEventId, courseFiles, lessons, canAuthor, canUpload, canApproveDirect, isStudent,
+  syllabusEventId, classId, viewClassName, classOptions,
+  courseFiles, lessons, canAuthor, canUpload, canApproveDirect, isStudent,
 }: Props) {
   const router = useRouter()
   const [lessonModal, setLessonModal] = useState<{ lesson: LessonRow | null } | null>(null)
   const [expanded,    setExpanded]    = useState<Set<string>>(new Set(lessons.length === 1 ? [lessons[0].id] : []))
+  const [dupOpen,     setDupOpen]     = useState(false)
+  const [dupTarget,   setDupTarget]   = useState('')
+  const [dupBusy,     setDupBusy]     = useState(false)
+  const [dupMsg,      setDupMsg]      = useState<string | null>(null)
+
+  const dupTargets = classOptions.filter(c => c.id !== classId)
+
+  async function handleDuplicate() {
+    if (!dupTarget) return
+    setDupBusy(true)
+    setDupMsg(null)
+    const result = await duplicateCourseContentAction(syllabusEventId, classId, dupTarget)
+    setDupBusy(false)
+    if ('error' in result && result.error) { setDupMsg(result.error); return }
+    setDupMsg(`Duplicated to Class ${'className' in result ? result.className : ''} — open its tab to edit.`)
+    router.refresh()
+  }
 
   function toggleLesson(id: string) {
     setExpanded(prev => {
@@ -430,12 +455,55 @@ export function CourseContent({
 
   return (
     <div className="space-y-6">
+      {/* Duplicate course content (owners — not visible to students) */}
+      {canAuthor && dupTargets.length > 0 && (
+        <section className="card">
+          {!dupOpen ? (
+            <button onClick={() => setDupOpen(true)} className="btn-secondary text-xs px-3 py-1.5">
+              ⧉ Duplicate Course Content to Another Class
+            </button>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm font-semibold text-tps-navy">
+                Duplicate {viewClassName}&apos;s page for this course
+              </p>
+              <p className="text-xs text-gray-500">
+                Copies the overview, objectives, outline, lessons (TLOs/PLOs), and
+                material links as an editable template for the target class.
+              </p>
+              <div className="flex gap-2 items-center flex-wrap">
+                <select
+                  value={dupTarget}
+                  onChange={e => setDupTarget(e.target.value)}
+                  className="field-input w-auto text-sm"
+                  disabled={dupBusy}
+                >
+                  <option value="">Duplicate for class…</option>
+                  {dupTargets.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}{c.isPlanning && !c.isActive ? ' (planning)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={handleDuplicate} disabled={dupBusy || !dupTarget} className="btn-primary text-xs px-3 py-2">
+                  {dupBusy ? 'Duplicating…' : 'Duplicate'}
+                </button>
+                <button onClick={() => { setDupOpen(false); setDupMsg(null) }} className="text-gray-400 text-sm px-1">Close</button>
+              </div>
+              {dupMsg && (
+                <p className={`text-xs ${dupMsg.startsWith('Duplicated') ? 'text-green-700' : 'text-red-600'}`}>{dupMsg}</p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Course-wide materials */}
       <section className="card">
         <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
           <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Course Documents</h2>
           {canUpload && (
-            <UploadButton syllabusEventId={syllabusEventId} lessonId={null} label="↑ Upload to Course" />
+            <UploadButton syllabusEventId={syllabusEventId} classId={classId} lessonId={null} label="↑ Upload to Course" />
           )}
         </div>
 
@@ -571,7 +639,7 @@ export function CourseContent({
                             Materials — slides, handouts, homework
                           </p>
                           {canUpload && (
-                            <UploadButton syllabusEventId={syllabusEventId} lessonId={lesson.id} label="↑ Upload" />
+                            <UploadButton syllabusEventId={syllabusEventId} classId={classId} lessonId={lesson.id} label="↑ Upload" />
                           )}
                         </div>
                         {lesson.files.length === 0 ? (
@@ -603,6 +671,7 @@ export function CourseContent({
       {lessonModal && (
         <LessonModal
           syllabusEventId={syllabusEventId}
+          classId={classId}
           lesson={lessonModal.lesson}
           onClose={() => setLessonModal(null)}
         />

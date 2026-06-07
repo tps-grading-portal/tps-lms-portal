@@ -4,46 +4,33 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/server-auth'
 import { can } from '@/lib/permissions'
 import { canEditEventContent } from '@/lib/content-authority'
-import { uploadFile, hashFile } from '@/lib/storage'
 import { revalidatePath } from 'next/cache'
 
-// ── Load lesson page data ─────────────────────────────────────────────────────
+// ── Load lesson page data (per class — cohorts keep separate content) ────────
 
-export async function getLessonPageAction(courseCode: string) {
+const PAGE_INCLUDE = {
+  author: { select: { firstName: true, lastName: true } },
+  files: {
+    include: { contentFile: { select: { id: true, title: true, storageUrl: true, mimeType: true, fileSizeBytes: true, status: true, fileName: true } } },
+    orderBy: { sortOrder: 'asc' as const },
+  },
+  lessons: {
+    include: {
+      files: {
+        include: { contentFile: { select: { id: true, title: true, storageUrl: true, mimeType: true, fileSizeBytes: true, status: true, fileName: true } } },
+        orderBy: { sortOrder: 'asc' as const },
+      },
+    },
+    orderBy: { sortOrder: 'asc' as const },
+  },
+}
+
+export async function getLessonPageAction(courseCode: string, classIdParam?: string) {
   const user = await requireAuth()
 
   const event = await db.syllabusEvent.findUnique({
     where:   { courseCode },
     include: {
-      lessonPage: {
-        include: {
-          author: { select: { firstName: true, lastName: true } },
-          files: {
-            include: { contentFile: { select: { id: true, title: true, storageUrl: true, mimeType: true, fileSizeBytes: true, status: true, fileName: true } } },
-            orderBy: { sortOrder: 'asc' },
-          },
-          lessons: {
-            include: {
-              files: {
-                include: { contentFile: { select: { id: true, title: true, storageUrl: true, mimeType: true, fileSizeBytes: true, status: true, fileName: true } } },
-                orderBy: { sortOrder: 'asc' },
-              },
-            },
-            orderBy: { sortOrder: 'asc' },
-          },
-        },
-      },
-      schedules: {
-        where: {
-          class: { isActive: true },
-        },
-        include: {
-          instructor: { select: { firstName: true, lastName: true } },
-          academicWeek: { select: { weekNumber: true, label: true } },
-          class: { select: { name: true } },
-        },
-        take: 1,
-      },
       prerequisites: {
         include: { prerequisite: { select: { id: true, courseCode: true, title: true } } },
       },
@@ -53,37 +40,75 @@ export async function getLessonPageAction(courseCode: string) {
 
   if (!event) return { event: null, studentContext: null }
 
+  // Classes with course sites: active + active-for-planning
+  const siteClasses = await db.class.findMany({
+    where:   { archivedAt: null, OR: [{ isActive: true }, { isPlanning: true }] },
+    orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    select:  { id: true, name: true, isActive: true, isPlanning: true },
+  })
+
+  // Resolve the viewing class: students always see THEIR class's page;
+  // staff pick via tabs (default: first active class).
+  let student: { id: string; classId: string } | null = null
+  if (user.role === 'STUDENT') {
+    student = await db.student.findFirst({
+      where:  { userId: user.id },
+      select: { id: true, classId: true },
+    })
+  }
+  const viewClassId =
+    student?.classId ??
+    (classIdParam && siteClasses.some(c => c.id === classIdParam) ? classIdParam : siteClasses[0]?.id ?? null)
+
+  // This class's page for this course
+  const lessonPage = viewClassId
+    ? await db.lessonPage.findUnique({
+        where:   { syllabusEventId_classId: { syllabusEventId: event.id, classId: viewClassId } },
+        include: PAGE_INCLUDE,
+      })
+    : null
+
+  // This class's schedule for this course
+  const schedules = viewClassId
+    ? await db.classSyllabusSchedule.findMany({
+        where:   { syllabusEventId: event.id, classId: viewClassId },
+        include: {
+          instructor:   { select: { firstName: true, lastName: true } },
+          academicWeek: { select: { weekNumber: true, label: true } },
+          class:        { select: { name: true } },
+        },
+        orderBy: { sessionNumber: 'asc' },
+      })
+    : []
+
   // Student context — their status for this event
   let studentContext: { status: string; score: number | null; completedAt: Date | null; viewedAt: Date | null } | null = null
 
-  if (user.role === 'STUDENT') {
-    const student = await db.student.findFirst({ where: { userId: user.id } })
-    if (student) {
-      const [studentEvent, view] = await Promise.all([
-        db.studentSyllabusEvent.findUnique({
-          where: { studentId_syllabusEventId: { studentId: student.id, syllabusEventId: event.id } },
-        }),
-        event.lessonPage
-          ? db.studentLessonView.findUnique({
-              where: { studentId_lessonPageId: { studentId: student.id, lessonPageId: event.lessonPage.id } },
-            })
-          : null,
-      ])
-      studentContext = {
-        status:      studentEvent?.status ?? 'LOCKED',
-        score:       studentEvent?.score ?? null,
-        completedAt: studentEvent?.completedAt ?? null,
-        viewedAt:    view?.lastViewedAt ?? null,
-      }
+  if (student) {
+    const [studentEvent, view] = await Promise.all([
+      db.studentSyllabusEvent.findUnique({
+        where: { studentId_syllabusEventId: { studentId: student.id, syllabusEventId: event.id } },
+      }),
+      lessonPage
+        ? db.studentLessonView.findUnique({
+            where: { studentId_lessonPageId: { studentId: student.id, lessonPageId: lessonPage.id } },
+          })
+        : null,
+    ])
+    studentContext = {
+      status:      studentEvent?.status ?? 'LOCKED',
+      score:       studentEvent?.score ?? null,
+      completedAt: studentEvent?.completedAt ?? null,
+      viewedAt:    view?.lastViewedAt ?? null,
+    }
 
-      // Record view
-      if (event.lessonPage) {
-        await db.studentLessonView.upsert({
-          where:  { studentId_lessonPageId: { studentId: student.id, lessonPageId: event.lessonPage.id } },
-          update: { lastViewedAt: new Date() },
-          create: { studentId: student.id, lessonPageId: event.lessonPage.id },
-        })
-      }
+    // Record view
+    if (lessonPage) {
+      await db.studentLessonView.upsert({
+        where:  { studentId_lessonPageId: { studentId: student.id, lessonPageId: lessonPage.id } },
+        update: { lastViewedAt: new Date() },
+        create: { studentId: student.id, lessonPageId: lessonPage.id },
+      })
     }
   }
 
@@ -95,6 +120,11 @@ export async function getLessonPageAction(courseCode: string) {
 
   return {
     event,
+    lessonPage,
+    schedules,
+    viewClassId,
+    viewClassName: siteClasses.find(c => c.id === viewClassId)?.name ?? null,
+    classOptions: user.role === 'STUDENT' ? [] : siteClasses,
     studentContext,
     canAuthor: canEditContent,
     canUpload: can(user.role, 'submit:content'),
@@ -103,7 +133,7 @@ export async function getLessonPageAction(courseCode: string) {
   }
 }
 
-// ── Lesson CRUD (multiple lessons per course) ─────────────────────────────────
+// ── Lesson CRUD (multiple lessons per course, per class) ─────────────────────
 
 async function requireContentAuthority(syllabusEventId: string) {
   const user = await requireAuth()
@@ -117,18 +147,21 @@ async function requireContentAuthority(syllabusEventId: string) {
   return { user, event }
 }
 
-/** Ensure a LessonPage exists for the event; returns its id. */
-async function ensureLessonPage(syllabusEventId: string, authorId: string): Promise<string> {
-  const existing = await db.lessonPage.findUnique({ where: { syllabusEventId }, select: { id: true } })
+/** Ensure a LessonPage exists for the event+class; returns its id. */
+async function ensureLessonPage(syllabusEventId: string, classId: string, authorId: string): Promise<string> {
+  const existing = await db.lessonPage.findUnique({
+    where:  { syllabusEventId_classId: { syllabusEventId, classId } },
+    select: { id: true },
+  })
   if (existing) return existing.id
   const page = await db.lessonPage.create({
-    data: { syllabusEventId, authorId },
+    data: { syllabusEventId, classId, authorId },
     select: { id: true },
   })
   return page.id
 }
 
-export async function saveLessonAction(syllabusEventId: string, data: {
+export async function saveLessonAction(syllabusEventId: string, classId: string, data: {
   lessonId: string | null   // null = create new
   title:    string
   overview: string
@@ -140,7 +173,7 @@ export async function saveLessonAction(syllabusEventId: string, data: {
   if ('error' in auth) return { error: auth.error }
   if (!data.title.trim()) return { error: 'Lesson title is required.' }
 
-  const lessonPageId = await ensureLessonPage(syllabusEventId, auth.user.id)
+  const lessonPageId = await ensureLessonPage(syllabusEventId, classId, auth.user.id)
 
   if (data.lessonId) {
     await db.lesson.update({
@@ -181,86 +214,6 @@ export async function deleteLessonAction(syllabusEventId: string, lessonId: stri
   return { ok: true }
 }
 
-// ── Direct upload to a course/lesson (enters the A9 vault pipeline) ──────────
-//
-// Content uploaded here is SANDBOX until the Chair → A9 chain approves it.
-// Staff see it on the page with a "Pending Approval" badge; students only
-// see VAULT-approved files.
-
-export async function uploadCourseContentAction(formData: FormData) {
-  try {
-  const user = await requireAuth()
-  if (!can(user.role, 'submit:content')) return { error: 'Insufficient permissions to submit content.' }
-
-  const syllabusEventId = formData.get('syllabusEventId')?.toString() ?? ''
-  const lessonId        = formData.get('lessonId')?.toString() || null
-  const title           = formData.get('title')?.toString().trim() ?? ''
-  const file            = formData.get('file') as File | null
-
-  const event = await db.syllabusEvent.findUnique({
-    where:  { id: syllabusEventId },
-    select: { id: true, courseCode: true, deptCode: true },
-  })
-  if (!event)                 return { error: 'Course not found.' }
-  if (!file || file.size === 0) return { error: 'A file is required.' }
-  if (file.size > 100 * 1024 * 1024) return { error: 'File exceeds 100 MB limit.' }
-
-  const bytes    = Buffer.from(await file.arrayBuffer())
-  const fileHash = hashFile(bytes)
-
-  const duplicate = await db.contentFile.findFirst({
-    where: { fileHash, status: { in: ['VAULT', 'PENDING_A9', 'PENDING_CHAIR', 'SANDBOX'] }, isLatest: true },
-  })
-  if (duplicate) return { error: 'An identical file has already been submitted.' }
-
-  const uploaded = await uploadFile(file.name, file.type || 'application/octet-stream', bytes, 'vault')
-
-  const content = await db.contentFile.create({
-    data: {
-      title:           title || file.name,
-      syllabusEventId: event.id,
-      uploadedById:    user.id,
-      status:          'SANDBOX',
-      storageProvider: (process.env.STORAGE_PROVIDER as 'VERCEL_BLOB' | 'AZURE_BLOB' | 'LOCAL') ?? 'VERCEL_BLOB',
-      storageKey:      uploaded.storageKey,
-      storageUrl:      uploaded.storageUrl,
-      fileHash:        uploaded.fileHash,
-      fileSizeBytes:   uploaded.fileSizeBytes,
-      mimeType:        uploaded.mimeType,
-      fileName:        uploaded.fileName,
-      isLatest:        true,
-      version:         1,
-    },
-  })
-
-  await db.contentWorkflow.create({
-    data: { contentFileId: content.id, submittedById: user.id, currentStatus: 'SANDBOX' },
-  })
-
-  // Attach to the course page (and lesson, if given) so it appears in place
-  const lessonPageId = await ensureLessonPage(event.id, user.id)
-  const maxOrder = await db.lessonPageFile.aggregate({
-    where: { lessonPageId },
-    _max:  { sortOrder: true },
-  })
-  await db.lessonPageFile.create({
-    data: {
-      lessonPageId,
-      lessonId,
-      contentFileId: content.id,
-      sortOrder:     (maxOrder._max.sortOrder ?? 0) + 1,
-    },
-  })
-
-  revalidatePath(`/portal/lessons/${event.courseCode}`)
-  revalidatePath('/portal/vault')
-  return { ok: true }
-  } catch (err) {
-    console.error('uploadCourseContentAction:', err)
-    return { error: 'Upload failed — file storage is unavailable. Contact the system admin if this persists.' }
-  }
-}
-
 // ── Client-upload registration (files go browser → Blob directly) ────────────
 //
 // Per workflow policy, uploads enter the approval chain immediately:
@@ -276,6 +229,7 @@ export type UploadedBlobMeta = {
 
 export async function registerCourseContentAction(data: {
   syllabusEventId: string
+  classId:         string
   lessonId:        string | null
   title:           string
   blob:            UploadedBlobMeta
@@ -311,8 +265,8 @@ export async function registerCourseContentAction(data: {
       data: { contentFileId: content.id, submittedById: user.id, currentStatus: 'PENDING_CHAIR' },
     })
 
-    // Attach to the course page (and lesson, if given)
-    const lessonPageId = await ensureLessonPage(event.id, user.id)
+    // Attach to this class's course page (and lesson, if given)
+    const lessonPageId = await ensureLessonPage(event.id, data.classId, user.id)
     const maxOrder = await db.lessonPageFile.aggregate({
       where: { lessonPageId },
       _max:  { sortOrder: true },
@@ -520,6 +474,7 @@ export async function getCatalogForPrereqsAction() {
 
 export async function saveLessonPageAction(
   syllabusEventId: string,
+  classId: string,
   data: {
     overview:           string
     learningObjectives: string[]
@@ -531,11 +486,13 @@ export async function saveLessonPageAction(
   const user = await requireAuth()
   if (!can(user.role, 'author:lessons')) return { error: 'Insufficient permissions' }
 
-  const existing = await db.lessonPage.findUnique({ where: { syllabusEventId } })
+  const existing = await db.lessonPage.findUnique({
+    where: { syllabusEventId_classId: { syllabusEventId, classId } },
+  })
 
   if (existing) {
     await db.lessonPage.update({
-      where: { syllabusEventId },
+      where: { id: existing.id },
       data: {
         overview:           data.overview || null,
         learningObjectives: data.learningObjectives.filter(Boolean),
@@ -549,6 +506,7 @@ export async function saveLessonPageAction(
     await db.lessonPage.create({
       data: {
         syllabusEventId,
+        classId,
         authorId:           user.id,
         overview:           data.overview || null,
         learningObjectives: data.learningObjectives.filter(Boolean),
@@ -563,6 +521,110 @@ export async function saveLessonPageAction(
   const event = await db.syllabusEvent.findUnique({ where: { id: syllabusEventId }, select: { courseCode: true } })
   if (event) revalidatePath(`/portal/lessons/${event.courseCode}`)
   return { ok: true }
+}
+
+// ── Duplicate course content to another class (course owners) ────────────────
+//
+// Copies this class's page — overview, objectives, outline, lessons,
+// TLO/PLOs, and material links — to the target class as an editable
+// template. Target must be active or active-for-planning.
+
+export async function duplicateCourseContentAction(
+  syllabusEventId: string,
+  fromClassId:     string,
+  toClassId:       string,
+) {
+  const auth = await requireContentAuthority(syllabusEventId)
+  if ('error' in auth) return { error: auth.error }
+  if (fromClassId === toClassId) return { error: 'Source and target class are the same.' }
+
+  const target = await db.class.findUnique({
+    where:  { id: toClassId },
+    select: { id: true, name: true, isActive: true, isPlanning: true, archivedAt: true },
+  })
+  if (!target || target.archivedAt || (!target.isActive && !target.isPlanning)) {
+    return { error: 'Target class must be Active or Active for Planning.' }
+  }
+
+  const source = await db.lessonPage.findUnique({
+    where:   { syllabusEventId_classId: { syllabusEventId, classId: fromClassId } },
+    include: {
+      lessons: { include: { files: true }, orderBy: { sortOrder: 'asc' } },
+      files:   { where: { lessonId: null } },
+    },
+  })
+  if (!source) return { error: 'Nothing to duplicate — this class has no course page yet.' }
+
+  const existing = await db.lessonPage.findUnique({
+    where: { syllabusEventId_classId: { syllabusEventId, classId: toClassId } },
+    select: { id: true },
+  })
+  if (existing) return { error: `Class ${target.name} already has a page for this course. Edit it directly instead.` }
+
+  // Copy the page
+  const newPage = await db.lessonPage.create({
+    data: {
+      syllabusEventId,
+      classId:            toClassId,
+      authorId:           auth.user.id,
+      overview:           source.overview,
+      learningObjectives: source.learningObjectives ?? undefined,
+      outline:            source.outline,
+      estimatedMinutes:   source.estimatedMinutes,
+      isPublished:        false, // new class's page starts unpublished
+    },
+  })
+
+  // Copy course-wide material links (same ContentFiles — re-upload to diverge)
+  for (const f of source.files) {
+    await db.lessonPageFile.create({
+      data: {
+        lessonPageId:  newPage.id,
+        contentFileId: f.contentFileId,
+        sortOrder:     f.sortOrder,
+        displayLabel:  f.displayLabel,
+      },
+    })
+  }
+
+  // Copy lessons + their material links
+  for (const lesson of source.lessons) {
+    const newLesson = await db.lesson.create({
+      data: {
+        lessonPageId: newPage.id,
+        title:        lesson.title,
+        overview:     lesson.overview,
+        outline:      lesson.outline,
+        tlos:         lesson.tlos ?? undefined,
+        plos:         lesson.plos ?? undefined,
+        sortOrder:    lesson.sortOrder,
+      },
+    })
+    for (const f of lesson.files) {
+      await db.lessonPageFile.create({
+        data: {
+          lessonPageId:  newPage.id,
+          lessonId:      newLesson.id,
+          contentFileId: f.contentFileId,
+          sortOrder:     f.sortOrder,
+          displayLabel:  f.displayLabel,
+        },
+      })
+    }
+  }
+
+  await db.auditLog.create({
+    data: {
+      userId:     auth.user.id,
+      action:     'DUPLICATE_COURSE_CONTENT',
+      targetType: 'LessonPage',
+      targetId:   newPage.id,
+      metadata:   { courseCode: auth.event.courseCode, fromClassId, toClassId, toClassName: target.name },
+    },
+  })
+
+  revalidatePath(`/portal/lessons/${auth.event.courseCode}`)
+  return { ok: true, className: target.name }
 }
 
 // ── Attach / detach vault file from lesson ────────────────────────────────────

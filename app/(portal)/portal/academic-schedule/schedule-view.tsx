@@ -39,7 +39,13 @@ const DEPT_COLORS: Record<string, string> = {
   TL: 'bg-rose-100 text-rose-700',
 }
 
-const CLASS_TOGGLE_COLORS = ['bg-blue-600 text-white', 'bg-amber-500 text-white']
+const CLASS_TOGGLE_COLORS = ['bg-blue-600 text-white', 'bg-amber-500 text-white', 'bg-purple-600 text-white']
+const CLASS_BANNER_COLORS = [
+  'bg-blue-50 border border-blue-200 text-blue-900',
+  'bg-amber-50 border border-amber-200 text-amber-900',
+  'bg-purple-50 border border-purple-200 text-purple-900',
+]
+const CLASS_LEGEND_COLORS = ['bg-blue-400', 'bg-amber-400', 'bg-purple-400']
 
 // ── Sessions modal (multi-day course editor) ─────────────────────────────────
 
@@ -581,7 +587,7 @@ function EventCard({
 
 type Props = {
   classes:           { id: string; name: string; isActive: boolean }[]
-  activeClasses:     { id: string; name: string; colorIdx: number; startDate: string | null }[]
+  activeClasses:     { id: string; name: string; colorIdx: number; startDate: string | null; isPlanning: boolean }[]
   selectedClassId:   string
   selectedClassName: string
   classStartDate:    string | null
@@ -681,6 +687,11 @@ export function ScheduleView({
   }
 
   function openSessionsForScheduled(e: ScheduledEventRow) {
+    // Students (and any view-only role) go straight to the course page
+    if (!canEdit) {
+      router.push(`/portal/lessons/${encodeURIComponent(e.courseCode)}`)
+      return
+    }
     setSessionsModal({
       classId:   e.classId,
       className: classNameById.get(e.classId) ?? '',
@@ -719,13 +730,13 @@ export function ScheduleView({
         </div>
 
         <div className="flex gap-2 flex-wrap items-center">
-          {/* Legend for the two classes */}
+          {/* Legend for visible classes */}
           {activeClasses.length > 1 && (
             <div className="flex gap-2 items-center mr-1">
               {activeClasses.map(c => (
                 <span key={c.id} className="flex items-center gap-1 text-xs text-gray-500">
-                  <span className={`w-3 h-3 rounded ${c.colorIdx === 0 ? 'bg-blue-400' : 'bg-amber-400'}`} />
-                  {c.name}
+                  <span className={`w-3 h-3 rounded ${CLASS_LEGEND_COLORS[c.colorIdx % CLASS_LEGEND_COLORS.length]}`} />
+                  {c.name}{c.isPlanning && <span className="text-gray-400">(planning)</span>}
                 </span>
               ))}
             </div>
@@ -759,18 +770,6 @@ export function ScheduleView({
             </div>
           )}
 
-          {canEdit && (
-            <button
-              onClick={() => setWeekForm({
-                weekId: null,
-                weekNumber: (Math.max(-1, ...weeks.map(w => w.weekNumber)) + 1).toString(),
-                label: '', theme: '', startDate: '', endDate: '',
-              })}
-              className="btn-secondary text-sm px-3 py-2"
-            >
-              + Week
-            </button>
-          )}
         </div>
       </div>
 
@@ -778,7 +777,8 @@ export function ScheduleView({
       {viewMode === 'calendar' && (
         <div className="flex flex-col lg:flex-row gap-4 items-start">
           <div className="flex-1 min-w-0 space-y-3 w-full">
-            {/* Week navigation — continuous, week by week */}
+            {/* Week navigation — continuous, week by week; click the date
+                range to jump anywhere via date picker */}
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => setViewMonday(m => shiftWeeks(m, -1))}
@@ -786,7 +786,17 @@ export function ScheduleView({
               >
                 ← Prev Week
               </button>
-              <span className="text-sm font-semibold text-tps-navy px-1">{weekRangeLabel}</span>
+              <label className="relative cursor-pointer group" title="Click to jump to any date">
+                <span className="text-sm font-semibold text-tps-navy px-1 group-hover:text-tps-orange transition-colors">
+                  {weekRangeLabel} ▾
+                </span>
+                <input
+                  type="date"
+                  value={viewMonday}
+                  onChange={e => { if (e.target.value) setViewMonday(mondayOf(e.target.value)) }}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+              </label>
               <button
                 onClick={() => setViewMonday(m => shiftWeeks(m, 1))}
                 className="btn-secondary text-sm px-3 py-1.5"
@@ -816,12 +826,13 @@ export function ScheduleView({
                     <div
                       key={c.id}
                       className={`flex-1 min-w-[180px] rounded-lg px-3 py-2 text-sm font-semibold ${
-                        c.colorIdx % 2 === 0 ? 'bg-blue-50 border border-blue-200 text-blue-900' : 'bg-amber-50 border border-amber-200 text-amber-900'
+                        CLASS_BANNER_COLORS[c.colorIdx % CLASS_BANNER_COLORS.length]
                       }`}
                     >
                       Class {c.name} — {n < 0
                         ? `starts in ${-n} week${n === -1 ? '' : 's'}`
                         : `Week ${n}`}
+                      {c.isPlanning && <span className="ml-1.5 text-xs font-normal opacity-70">(planning)</span>}
                     </div>
                   )
                 })}
@@ -831,7 +842,7 @@ export function ScheduleView({
             <WeekCalendar
               weekStartISO={viewMonday}
               events={scheduled}
-              showTwoClasses={activeClasses.length > 1}
+              laneCount={activeClasses.length}
               days={showWeekend ? 7 : 5}
               canEdit={canEdit}
               onSlotClick={handleSlotClick}
